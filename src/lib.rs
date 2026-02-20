@@ -1,5 +1,7 @@
 mod types;
 mod vm;
+pub mod parser;
+
 pub fn compile() -> Result<(), ()> {
     Ok(())
 }
