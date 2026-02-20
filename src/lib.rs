@@ -1,10 +1,7 @@
 mod types;
 mod vm;
 pub mod parser;
-
-pub fn compile() -> Result<(), ()> {
-    Ok(())
-}
+pub mod compiler;
 
 pub fn verify() -> Result<(), ()> {
     Ok(())
