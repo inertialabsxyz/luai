@@ -18,6 +18,7 @@ pub enum LuaKey {
     Boolean(bool),
 }
 
+#[derive(Debug, Clone)]
 pub struct LuaTable {
     memory: Rc<RefCell<Memory>>,
     /// Integer keys 1..array_len stored at index key-1.
