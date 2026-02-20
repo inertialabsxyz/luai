@@ -30,7 +30,16 @@ pub struct LuaTable {
 }
 
 impl LuaTable {
-    fn get(&self, key: &LuaKey) -> Option<&LuaValue> {
+    pub fn new() -> Self {
+        LuaTable {
+            memory: Rc::new(RefCell::new(Memory)),
+            array: Vec::new(),
+            hash: BTreeMap::new(),
+            entry_count: 0,
+        }
+    }
+
+    pub fn get(&self, key: &LuaKey) -> Option<&LuaValue> {
         if let LuaKey::Integer(i) = key {
             if *i >= 1 && *i <= self.array.len() as i64 {
                 return Some(&self.array[(*i - 1) as usize]);
@@ -39,7 +48,7 @@ impl LuaTable {
         self.hash.get(key)
     }
 
-    fn rawset(&mut self, key: LuaKey, value: LuaValue) -> Result<(), LuaError> {
+    pub fn rawset(&mut self, key: LuaKey, value: LuaValue) -> Result<(), LuaError> {
         if let LuaKey::Integer(i) = key {
             if i == i64::MIN {
                 return Err(LuaError::ERR_RUNTIME);
@@ -100,7 +109,7 @@ impl LuaTable {
         array_charge + hash_charge
     }
 
-    fn rawremove(&mut self, key: &LuaKey) {
+    pub fn rawremove(&mut self, key: &LuaKey) {
         let removed = if let LuaKey::Integer(i) = key {
             if *i >= 1 && *i <= self.array.len() as i64 {
                 self.array.remove((*i - 1) as usize);
@@ -117,11 +126,11 @@ impl LuaTable {
         }
     }
 
-    fn length(&self) -> i64 {
+    pub fn length(&self) -> i64 {
         self.array.len() as i64
     }
 
-    fn next_sorted(&self, after: Option<&LuaKey>) -> Option<(LuaKey, &LuaValue)> {
+    pub fn next_sorted(&self, after: Option<&LuaKey>) -> Option<(LuaKey, &LuaValue)> {
         // Canonical order: integers 1..array_len, then hash keys (BTreeMap order).
         let array_len = self.array.len() as i64;
 
@@ -175,7 +184,7 @@ mod tests {
     }
 
     fn str_key(s: &str) -> LuaKey {
-        LuaKey::String(Arc::from(s.as_bytes()))
+        LuaKey::String(LuaString::from_str(s))
     }
 
     fn as_int(v: &LuaValue) -> i64 {
