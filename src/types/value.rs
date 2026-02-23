@@ -53,8 +53,14 @@ pub struct LuaClosure {
     pub upvalues: Vec<Rc<RefCell<LuaValue>>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LuaString(Arc<[u8]>);
+
+impl std::fmt::Debug for LuaString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "\"{}\"", String::from_utf8_lossy(&self.0))
+    }
+}
 
 impl LuaString {
     pub fn from_bytes(bytes: &[u8]) -> Self {

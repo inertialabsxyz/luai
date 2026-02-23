@@ -11,6 +11,13 @@ use std::{
     io::{self, Read},
 };
 
+fn source_line(source: &str, line: u32) -> &str {
+    source
+        .lines()
+        .nth(line.saturating_sub(1) as usize)
+        .unwrap_or("")
+}
+
 fn run(source: &str) -> Result<(), VmError> {
     let ast = parser::parse(source).map_err(|e| {
         VmError::RuntimeError(LuaValue::String(luai::types::value::LuaString::from_str(
@@ -57,7 +64,15 @@ fn main() {
     };
 
     if let Err(e) = run(&source) {
-        eprintln!("runtime error: {e:?}");
+        use luai::vm::gas::VmError;
+        match e {
+            VmError::WithLine(line, inner) => {
+                let text = source_line(&source, line).trim();
+                eprintln!("runtime error at line {line}: {inner:?}");
+                eprintln!("  --> {text}");
+            }
+            other => eprintln!("runtime error: {other:?}"),
+        }
         std::process::exit(1);
     }
 }

@@ -43,15 +43,18 @@ pub enum VmError {
     ToolError(String),
     /// ERR_OUTPUT — unrecoverable
     OutputExceeded,
+    /// Wraps another error with source line information.
+    WithLine(u32, Box<VmError>),
 }
 
 impl VmError {
     /// True for errors that cannot be caught by pcall.
     pub fn is_unrecoverable(&self) -> bool {
-        matches!(
-            self,
-            VmError::GasExhausted | VmError::MemoryExhausted | VmError::OutputExceeded
-        )
+        match self {
+            VmError::GasExhausted | VmError::MemoryExhausted | VmError::OutputExceeded => true,
+            VmError::WithLine(_, inner) => inner.is_unrecoverable(),
+            _ => false,
+        }
     }
 }
 

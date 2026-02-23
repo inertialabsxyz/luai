@@ -240,7 +240,10 @@ impl<H: HostInterface> Vm<H> {
                     break;
                 }
                 Ok(None) => {}
-                Err(e) => return Err(e),
+                Err(e) => {
+                    let line = program.prototypes[proto_idx].lines.get(pc).copied().unwrap_or(0);
+                    return Err(VmError::WithLine(line, Box::new(e)));
+                }
             }
 
             if self.frames.is_empty() {
@@ -829,10 +832,8 @@ impl<H: HostInterface> Vm<H> {
 
             Instruction::Log => {
                 let val = self.pop_value()?;
-                let msg = match val {
-                    LuaValue::String(ref s) => String::from_utf8_lossy(s.as_bytes()).into_owned(),
-                    _ => return Err(VmError::TypeError("log argument must be a string".into())),
-                };
+                let ls = val.to_lua_string();
+                let msg = String::from_utf8_lossy(ls.as_bytes()).into_owned();
                 self.gas.charge(gas_cost::LOG_BASE + msg.len() as u64)?;
                 self.logs.push(msg);
             }
@@ -1327,6 +1328,7 @@ fn error_to_lua_value(e: VmError) -> LuaValue {
         VmError::GasExhausted => LuaValue::String(LuaString::from_str("gas exhausted")),
         VmError::MemoryExhausted => LuaValue::String(LuaString::from_str("memory exhausted")),
         VmError::OutputExceeded => LuaValue::String(LuaString::from_str("output exceeded")),
+        VmError::WithLine(_, inner) => error_to_lua_value(*inner),
     }
 }
 
@@ -1397,6 +1399,13 @@ mod tests {
         Vm::new(VmConfig::default(), NoopHost)
     }
 
+    fn strip_line_info(e: VmError) -> VmError {
+        match e {
+            VmError::WithLine(_, inner) => *inner,
+            other => other,
+        }
+    }
+
     /// Parse → compile → verify → execute a Lua source string.
     fn compile_and_run(source: &str) -> Result<LuaValue, VmError> {
         compile_and_run_with_config(source, VmConfig::default())
@@ -1422,7 +1431,7 @@ mod tests {
             ))))
         })?;
         let mut vm = Vm::new(config, NoopHost);
-        let output = vm.execute(&program, LuaValue::Nil)?;
+        let output = vm.execute(&program, LuaValue::Nil).map_err(strip_line_info)?;
         Ok(output.return_value)
     }
 

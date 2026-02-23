@@ -210,12 +210,29 @@ fn builtin_tonumber(args: &[LuaValue]) -> Result<Vec<LuaValue>, VmError> {
 }
 
 fn builtin_select(args: &[LuaValue], gas: &mut GasMeter) -> Result<Vec<LuaValue>, VmError> {
-    let n = require_integer(args, 0, "select")?;
-    let t = require_table(args, 1, "select")?;
-    gas.charge(gas_cost::TABLE_GET)?;
-    let key = LuaKey::Integer(n);
-    let val = t.borrow().get(&key).cloned().unwrap_or(LuaValue::Nil);
-    Ok(vec![val])
+    gas.charge(gas_cost::BASE_INSTRUCTION)?;
+    let index = require_arg(args, 0, "select")?;
+    let rest = if args.len() > 1 { &args[1..] } else { &[] };
+    match index {
+        LuaValue::String(s) if s.as_bytes() == b"#" => {
+            Ok(vec![LuaValue::Integer(rest.len() as i64)])
+        }
+        LuaValue::Integer(n) => {
+            let n = *n;
+            let len = rest.len() as i64;
+            let idx = if n < 0 { len + n } else { n - 1 };
+            if idx < 0 || idx >= len {
+                return Err(VmError::RuntimeError(LuaValue::String(LuaString::from_str(
+                    "bad argument #1 to 'select' (index out of range)",
+                ))));
+            }
+            Ok(vec![rest[idx as usize].clone()])
+        }
+        other => Err(VmError::TypeError(format!(
+            "select: expected integer or '#', got {}",
+            other.type_name()
+        ))),
+    }
 }
 
 fn builtin_unpack(args: &[LuaValue], gas: &mut GasMeter) -> Result<Vec<LuaValue>, VmError> {
@@ -1634,17 +1651,20 @@ mod tests {
 
     #[test]
     fn select_basic() {
-        let t = make_table();
-        t.borrow_mut().rawset(LuaKey::Integer(2), int(99)).unwrap();
-        let result = dispatch(BuiltinId::Select, vec![int(2), tval(t)]).unwrap();
-        assert_eq!(result, vec![int(99)]);
+        let result = dispatch(BuiltinId::Select, vec![int(2), int(10), int(20), int(30)]).unwrap();
+        assert_eq!(result, vec![int(20)]);
     }
 
     #[test]
-    fn select_missing_returns_nil() {
-        let t = make_table();
-        let result = dispatch(BuiltinId::Select, vec![int(1), tval(t)]).unwrap();
-        assert_eq!(result, vec![LuaValue::Nil]);
+    fn select_hash_returns_count() {
+        let result = dispatch(BuiltinId::Select, vec![s("#"), int(10), int(20)]).unwrap();
+        assert_eq!(result, vec![int(2)]);
+    }
+
+    #[test]
+    fn select_negative_index() {
+        let result = dispatch(BuiltinId::Select, vec![int(-1), int(10), int(20), int(30)]).unwrap();
+        assert_eq!(result, vec![int(30)]);
     }
 
     // ── unpack ────────────────────────────────────────────────────────────────

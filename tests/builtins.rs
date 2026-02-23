@@ -13,12 +13,19 @@ use luai::types::value::LuaValue;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+fn strip_line_info(e: VmError) -> VmError {
+    match e {
+        VmError::WithLine(_, inner) => *inner,
+        other => other,
+    }
+}
+
 fn run(src: &str) -> Result<VmOutput, VmError> {
     let block = parse(src).expect("parse failed");
     let program = compile(&block).expect("compile failed");
     verify(&program).expect("verify failed");
     let mut vm = Vm::new(VmConfig::default(), NoopHost);
-    vm.execute(&program, LuaValue::Nil)
+    vm.execute(&program, LuaValue::Nil).map_err(strip_line_info)
 }
 
 fn run_ok(src: &str) -> VmOutput {
@@ -175,12 +182,12 @@ fn error_caught_by_pcall() {
 
 #[test]
 fn select_returns_nth_element() {
-    assert_returns_int("local t = {10, 20, 30} return select(2, t)", 20);
+    assert_returns_int("return select(2, 10, 20, 30)", 20);
 }
 
 #[test]
-fn select_missing_returns_nil() {
-    assert_returns_nil("local t = {10} return select(5, t)");
+fn select_hash_returns_count() {
+    assert_returns_int("return select(\"#\", 10, 20, 30)", 3);
 }
 
 // ── unpack() ─────────────────────────────────────────────────────────────────
