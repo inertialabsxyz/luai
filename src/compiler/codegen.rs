@@ -84,9 +84,14 @@ impl Compiler {
         self.scopes.push(FunctionScope::new(param_count));
         // Push an initial block for parameters.
         self.current_scope_mut().blocks.push(Vec::new());
-        // Parameters are pre-assigned to slots 0..param_count; we don't
-        // call declare_local for them here because their slots are already
-        // reserved via `next_slot = param_count`.
+    }
+
+    /// Register a parameter name at a fixed slot (0..param_count) without
+    /// advancing `next_slot`. Used by `compile_function_body`.
+    fn register_param(&mut self, name: &str, slot: u8) {
+        let scope = self.current_scope_mut();
+        let block = scope.blocks.last_mut().expect("no block");
+        block.push(LocalVar { name: name.to_string(), slot });
     }
 
     fn exit_function(&mut self) -> FunctionProto {
@@ -1121,16 +1126,19 @@ impl Compiler {
         let total_params = (extra_params.len() + body.params.len()) as u8;
         self.enter_function(total_params);
 
-        // Declare extra params (e.g. self) and named params as locals.
-        // enter_function sets next_slot = param_count, but we need locals
-        // registered in the block for name resolution.
+        // Register params at their pre-assigned slots 0..param_count.
+        // We use register_param (not declare_local) to avoid advancing next_slot.
         let param_line = body.span.line;
+        let mut param_slot: u8 = 0;
         for name in extra_params {
-            self.declare_local(name, param_line)?;
+            self.register_param(name, param_slot);
+            param_slot += 1;
         }
-        for (name, span) in &body.params {
-            self.declare_local(name, span.line)?;
+        for (name, _span) in &body.params {
+            self.register_param(name, param_slot);
+            param_slot += 1;
         }
+        let _ = param_line; // silence warning
 
         self.compile_block(&body.block)?;
 

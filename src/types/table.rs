@@ -1,8 +1,5 @@
-use crate::{
-    types::value::{LuaError, LuaString, LuaValue, MAX_TABLE_ENTRIES},
-    vm::memory::Memory,
-};
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
+use crate::types::value::{LuaError, LuaString, LuaValue, MAX_TABLE_ENTRIES};
+use std::collections::BTreeMap;
 
 //
 // | Key Type  | Order                        |
@@ -18,24 +15,39 @@ pub enum LuaKey {
     Boolean(bool),
 }
 
+/// Result of a tracked rawset operation.
+#[derive(Debug, PartialEq)]
+pub enum RawsetResult {
+    /// An existing key was updated (no new entry).
+    Updated,
+    /// A new key was inserted.
+    Inserted {
+        /// True if the hash-part backing capacity doubled.
+        grew: bool,
+        /// The new hash backing capacity after possible growth.
+        new_hash_capacity: usize,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub struct LuaTable {
-    memory: Rc<RefCell<Memory>>,
     /// Integer keys 1..array_len stored at index key-1.
     array: Vec<LuaValue>,
     /// All other keys in canonical order.
     hash: BTreeMap<LuaKey, LuaValue>,
     /// Total logical entry count (array + hash), for memory accounting.
     entry_count: usize,
+    /// Current hash backing capacity (power of 2 or 0).
+    hash_capacity: usize,
 }
 
 impl LuaTable {
     pub fn new() -> Self {
         LuaTable {
-            memory: Rc::new(RefCell::new(Memory)),
             array: Vec::new(),
             hash: BTreeMap::new(),
             entry_count: 0,
+            hash_capacity: 0,
         }
     }
 
@@ -48,7 +60,18 @@ impl LuaTable {
         self.hash.get(key)
     }
 
+    /// Returns current hash backing capacity (for memory/gas accounting).
+    pub fn capacity(&self) -> usize {
+        self.hash_capacity
+    }
+
     pub fn rawset(&mut self, key: LuaKey, value: LuaValue) -> Result<(), LuaError> {
+        self.rawset_tracked(key, value).map(|_| ())
+    }
+
+    /// Like `rawset` but returns metadata about whether a key was inserted and
+    /// whether the hash backing array grew.
+    pub fn rawset_tracked(&mut self, key: LuaKey, value: LuaValue) -> Result<RawsetResult, LuaError> {
         if let LuaKey::Integer(i) = key {
             if i == i64::MIN {
                 return Err(LuaError::ERR_RUNTIME);
@@ -57,56 +80,75 @@ impl LuaTable {
 
         if matches!(value, LuaValue::Nil) {
             self.rawremove(&key);
-            return Ok(());
+            // Treat nil-set as an update (no new key).
+            return Ok(RawsetResult::Updated);
         }
 
-        match &key {
+        let result = match &key {
             LuaKey::Integer(i) if *i >= 1 => {
                 let i = *i as usize;
                 if i <= self.array.len() + 1 {
                     if i <= self.array.len() {
+                        // Updating existing array slot.
                         self.array[i - 1] = value;
+                        RawsetResult::Updated
                     } else {
+                        // Extending array.
                         self.array.push(value);
                         self.entry_count += 1;
+                        // Consolidate: pull hash keys that fill the gap.
                         loop {
                             let next = LuaKey::Integer((self.array.len() + 1) as i64);
                             if let Some(v) = self.hash.remove(&next) {
                                 self.array.push(v);
+                                // entry_count doesn't change (moved from hash)
                             } else {
                                 break;
                             }
                         }
+                        RawsetResult::Inserted { grew: false, new_hash_capacity: self.hash_capacity }
                     }
                 } else {
+                    let old_capacity = self.hash_capacity;
                     let is_new = self.hash.insert(key, value).is_none();
                     if is_new {
                         self.entry_count += 1;
+                        let new_cap = self.update_hash_capacity();
+                        let grew = new_cap > old_capacity;
+                        RawsetResult::Inserted { grew, new_hash_capacity: new_cap }
+                    } else {
+                        RawsetResult::Updated
                     }
                 }
             }
             _ => {
+                let old_capacity = self.hash_capacity;
                 let is_new = self.hash.insert(key, value).is_none();
                 if is_new {
                     self.entry_count += 1;
+                    let new_cap = self.update_hash_capacity();
+                    let grew = new_cap > old_capacity;
+                    RawsetResult::Inserted { grew, new_hash_capacity: new_cap }
+                } else {
+                    RawsetResult::Updated
                 }
             }
-        }
+        };
 
         if self.entry_count > MAX_TABLE_ENTRIES {
             return Err(LuaError::ERR_MEM);
         }
 
-        self.memory.borrow_mut().track_alloc(self.charged_bytes())?;
-
-        Ok(())
+        Ok(result)
     }
 
-    pub fn charged_bytes(&self) -> usize {
-        let array_charge = self.array.capacity() * 16;
-        let hash_capacity = next_power_of_two_capacity(self.hash.len()); // 0,4,8,16,...
-        let hash_charge = 64 + hash_capacity * 40;
-        array_charge + hash_charge
+    /// Update `hash_capacity` based on current hash length. Returns new capacity.
+    fn update_hash_capacity(&mut self) -> usize {
+        let needed = next_power_of_two_capacity(self.hash.len());
+        if needed > self.hash_capacity {
+            self.hash_capacity = needed;
+        }
+        self.hash_capacity
     }
 
     pub fn rawremove(&mut self, key: &LuaKey) {
@@ -154,6 +196,26 @@ impl LuaTable {
 
         hash_iter.into_iter().next().map(|(k, v)| (k.clone(), v))
     }
+
+    /// Returns all keys in canonical order (integer keys 1..n first, then hash keys).
+    pub fn sorted_keys(&self) -> Vec<LuaValue> {
+        let mut keys = Vec::with_capacity(self.entry_count);
+        // Array portion: integer keys 1..array.len()
+        for i in 1..=(self.array.len() as i64) {
+            keys.push(LuaValue::Integer(i));
+        }
+        // Hash portion in BTreeMap order
+        for k in self.hash.keys() {
+            keys.push(LuaValue::from(k.clone()));
+        }
+        keys
+    }
+
+    pub fn charged_bytes(&self) -> usize {
+        let array_charge = self.array.capacity() * 16;
+        let hash_charge = 64 + self.hash_capacity * 40;
+        array_charge + hash_charge
+    }
 }
 
 fn next_power_of_two_capacity(n: usize) -> usize {
@@ -167,16 +229,9 @@ fn next_power_of_two_capacity(n: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vm::memory::Memory;
-    use std::{cell::RefCell, rc::Rc, sync::Arc};
 
     fn make_table() -> LuaTable {
-        LuaTable {
-            memory: Rc::new(RefCell::new(Memory)),
-            array: Vec::new(),
-            hash: BTreeMap::new(),
-            entry_count: 0,
-        }
+        LuaTable::new()
     }
 
     fn int(i: i64) -> LuaValue {
@@ -403,5 +458,36 @@ mod tests {
         };
 
         assert_eq!(collect_keys(&t1), collect_keys(&t2));
+    }
+
+    // sorted_keys returns all keys in canonical order
+    #[test]
+    fn sorted_keys_canonical_order() {
+        let mut t = make_table();
+        t.rawset(str_key("b"), int(2)).unwrap();
+        t.rawset(LuaKey::Integer(1), int(10)).unwrap();
+        t.rawset(str_key("a"), int(1)).unwrap();
+        t.rawset(LuaKey::Integer(2), int(20)).unwrap();
+
+        let keys = t.sorted_keys();
+        assert_eq!(
+            keys,
+            vec![
+                LuaValue::Integer(1),
+                LuaValue::Integer(2),
+                LuaValue::String(LuaString::from_str("a")),
+                LuaValue::String(LuaString::from_str("b")),
+            ]
+        );
+    }
+
+    // rawset_tracked returns Inserted/Updated correctly
+    #[test]
+    fn rawset_tracked_distinguishes_insert_update() {
+        let mut t = make_table();
+        let r1 = t.rawset_tracked(str_key("x"), int(1)).unwrap();
+        assert!(matches!(r1, RawsetResult::Inserted { .. }));
+        let r2 = t.rawset_tracked(str_key("x"), int(2)).unwrap();
+        assert_eq!(r2, RawsetResult::Updated);
     }
 }

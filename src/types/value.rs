@@ -1,6 +1,5 @@
 use std::{
     cell::RefCell,
-    ops::{Div, Neg},
     rc::Rc,
     sync::Arc,
 };
@@ -13,6 +12,13 @@ pub enum LuaError {
     ERR_RUNTIME,
     ERR_MEM,
     ERR_TYPE,
+}
+
+/// A Lua closure: a function prototype index plus captured upvalues.
+#[derive(Debug, Clone)]
+pub struct LuaClosure {
+    pub proto_idx: usize,
+    pub upvalues: Vec<Rc<RefCell<LuaValue>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -41,18 +47,13 @@ impl LuaString {
 }
 
 #[derive(Debug, Clone)]
-pub struct LuaFunction {
-    _private: (),
-}
-
-#[derive(Debug, Clone)]
 pub enum LuaValue {
     Nil,
     Boolean(bool),
     Integer(i64),
     String(LuaString),
     Table(Rc<RefCell<LuaTable>>),
-    Function(LuaFunction),
+    Function(LuaClosure),
 }
 
 impl LuaValue {
@@ -83,7 +84,12 @@ impl PartialEq for LuaValue {
             (LuaValue::String(a), LuaValue::String(b)) => a == b,
             (LuaValue::Table(a), LuaValue::Table(b)) => Rc::ptr_eq(a, b),
             (LuaValue::Function(a), LuaValue::Function(b)) => {
-                std::ptr::eq(a as *const _, b as *const _)
+                a.proto_idx == b.proto_idx
+                    && a.upvalues.len() == b.upvalues.len()
+                    && a.upvalues
+                        .iter()
+                        .zip(b.upvalues.iter())
+                        .all(|(x, y)| Rc::ptr_eq(x, y))
             }
             _ => false,
         }
@@ -124,7 +130,7 @@ impl LuaValue {
         }
     }
 
-    pub fn as_function(&self) -> Result<&LuaFunction, LuaError> {
+    pub fn as_function(&self) -> Result<&LuaClosure, LuaError> {
         match self {
             LuaValue::Function(f) => Ok(f),
             _ => Err(LuaError::ERR_TYPE),
@@ -312,7 +318,7 @@ mod tests {
         assert_eq!(int(0).type_name(), "integer");
         assert_eq!(s("").type_name(), "string");
         assert_eq!(make_table().type_name(), "table");
-        assert_eq!(LuaValue::Function(LuaFunction { _private: () }).type_name(), "function");
+        assert_eq!(LuaValue::Function(LuaClosure { proto_idx: 0, upvalues: vec![] }).type_name(), "function");
     }
 
     // --- is_truthy ---
@@ -529,7 +535,7 @@ mod tests {
         assert_eq!(s("hello").to_lua_string(), ls("hello"));
         assert_eq!(make_table().to_lua_string(), ls("table"));
         assert_eq!(
-            LuaValue::Function(LuaFunction { _private: () }).to_lua_string(),
+            LuaValue::Function(LuaClosure { proto_idx: 0, upvalues: vec![] }).to_lua_string(),
             ls("function")
         );
     }

@@ -228,8 +228,9 @@ fn stack_analysis(proto_idx: u16, proto: &FunctionProto) -> Result<(), VerifyErr
     // Worklist: (pc, depth_at_entry)
     let mut worklist: VecDeque<(usize, usize)> = VecDeque::new();
 
-    // Seed with entry: params are already on stack.
-    let entry_depth = proto.param_count as usize;
+    // Seed with entry: params are in local slots (not on the operand stack).
+    // The operand stack starts empty at function entry.
+    let entry_depth = 0usize;
     schedule(proto_idx, 0, entry_depth, &mut depths, &mut worklist)?;
 
     while let Some((pc, d)) = worklist.pop_front() {
