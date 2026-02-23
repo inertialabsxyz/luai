@@ -1,17 +1,13 @@
-use std::{
-    cell::RefCell,
-    rc::Rc,
-    sync::Arc,
-};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use crate::types::table::{LuaKey, LuaTable};
 pub const MAX_TABLE_ENTRIES: usize = 50_000;
 
 #[derive(Debug)]
 pub enum LuaError {
-    ERR_RUNTIME,
-    ERR_MEM,
-    ERR_TYPE,
+    Runtime,
+    Memory,
+    Type,
 }
 
 /// A Lua closure: a function prototype index plus captured upvalues.
@@ -98,12 +94,12 @@ impl PartialEq for LuaValue {
 
 impl LuaValue {
     /// Returns Ok(Ordering) if the two values support comparison.
-    /// Returns Err(LuaError(ERR_TYPE)) otherwise.
+    /// Returns Err(LuaError(Type)) otherwise.
     pub fn lua_cmp(&self, other: &Self) -> Result<std::cmp::Ordering, LuaError> {
         match (self, other) {
             (LuaValue::Integer(a), LuaValue::Integer(b)) => Ok(a.cmp(b)),
             (LuaValue::String(a), LuaValue::String(b)) => Ok(a.cmp(b)),
-            _ => Err(LuaError::ERR_TYPE),
+            _ => Err(LuaError::Type),
         }
     }
 }
@@ -112,35 +108,35 @@ impl LuaValue {
     pub fn as_integer(&self) -> Result<i64, LuaError> {
         match self {
             LuaValue::Integer(n) => Ok(*n),
-            _ => Err(LuaError::ERR_TYPE),
+            _ => Err(LuaError::Type),
         }
     }
 
     pub fn as_string(&self) -> Result<&LuaString, LuaError> {
         match self {
             LuaValue::String(s) => Ok(s),
-            _ => Err(LuaError::ERR_TYPE),
+            _ => Err(LuaError::Type),
         }
     }
 
     pub fn as_table(&self) -> Result<Rc<RefCell<LuaTable>>, LuaError> {
         match self {
             LuaValue::Table(t) => Ok(Rc::clone(t)),
-            _ => Err(LuaError::ERR_TYPE),
+            _ => Err(LuaError::Type),
         }
     }
 
     pub fn as_function(&self) -> Result<&LuaClosure, LuaError> {
         match self {
             LuaValue::Function(f) => Ok(f),
-            _ => Err(LuaError::ERR_TYPE),
+            _ => Err(LuaError::Type),
         }
     }
 
     pub fn as_bool(&self) -> Result<bool, LuaError> {
         match self {
             LuaValue::Boolean(b) => Ok(*b),
-            _ => Err(LuaError::ERR_TYPE),
+            _ => Err(LuaError::Type),
         }
     }
 }
@@ -176,7 +172,7 @@ impl LuaValue {
         match self {
             LuaValue::String(s) => Ok(LuaValue::Integer(s.len() as i64)),
             LuaValue::Table(t) => Ok(LuaValue::Integer(t.borrow().length())),
-            _ => Err(LuaError::ERR_TYPE),
+            _ => Err(LuaError::Type),
         }
     }
 }
@@ -186,9 +182,9 @@ impl LuaValue {
             LuaValue::Integer(n) => Ok(LuaKey::Integer(n)),
             LuaValue::String(s) => Ok(LuaKey::String(s)),
             LuaValue::Boolean(b) => Ok(LuaKey::Boolean(b)),
-            LuaValue::Nil => Err(LuaError::ERR_RUNTIME),
-            LuaValue::Table(_) => Err(LuaError::ERR_TYPE),
-            LuaValue::Function(_) => Err(LuaError::ERR_TYPE),
+            LuaValue::Nil => Err(LuaError::Runtime),
+            LuaValue::Table(_) => Err(LuaError::Type),
+            LuaValue::Function(_) => Err(LuaError::Type),
         }
     }
 }
@@ -221,16 +217,16 @@ impl LuaValue {
         let left = match self {
             LuaValue::String(s) => s.clone(),
             LuaValue::Integer(n) => LuaString::from_str(&n.to_string()),
-            _ => return Err(LuaError::ERR_TYPE),
+            _ => return Err(LuaError::Type),
         };
         let right = match rhs {
             LuaValue::String(s) => s.clone(),
             LuaValue::Integer(n) => LuaString::from_str(&n.to_string()),
-            _ => return Err(LuaError::ERR_TYPE),
+            _ => return Err(LuaError::Type),
         };
         let total_len = left.len() + right.len();
         if total_len > 65536 {
-            return Err(LuaError::ERR_MEM);
+            return Err(LuaError::Memory);
         }
         let mut buf = Vec::with_capacity(total_len);
         buf.extend_from_slice(left.as_bytes());
@@ -259,7 +255,7 @@ impl LuaValue {
         let a = self.as_integer()?;
         let b = rhs.as_integer()?;
         if b == 0 {
-            return Err(LuaError::ERR_RUNTIME);
+            return Err(LuaError::Runtime);
         }
         // Rust's `/` truncates; floor division: adjust when signs differ and remainder nonzero.
         let d = a.wrapping_div(b);
@@ -274,7 +270,7 @@ impl LuaValue {
         let a = self.as_integer()?;
         let b = rhs.as_integer()?;
         if b == 0 {
-            return Err(LuaError::ERR_RUNTIME);
+            return Err(LuaError::Runtime);
         }
         let r = a.wrapping_rem(b);
         if (r != 0) && ((r < 0) != (b < 0)) {
@@ -318,7 +314,14 @@ mod tests {
         assert_eq!(int(0).type_name(), "integer");
         assert_eq!(s("").type_name(), "string");
         assert_eq!(make_table().type_name(), "table");
-        assert_eq!(LuaValue::Function(LuaClosure { proto_idx: 0, upvalues: vec![] }).type_name(), "function");
+        assert_eq!(
+            LuaValue::Function(LuaClosure {
+                proto_idx: 0,
+                upvalues: vec![]
+            })
+            .type_name(),
+            "function"
+        );
     }
 
     // --- is_truthy ---
@@ -387,7 +390,7 @@ mod tests {
 
     #[test]
     fn cmp_mixed_type_is_err_type() {
-        assert!(matches!(int(1).lua_cmp(&s("1")), Err(LuaError::ERR_TYPE)));
+        assert!(matches!(int(1).lua_cmp(&s("1")), Err(LuaError::Type)));
     }
 
     // --- lua_add ---
@@ -435,7 +438,7 @@ mod tests {
 
     #[test]
     fn idiv_by_zero() {
-        assert!(matches!(int(7).lua_idiv(&int(0)), Err(LuaError::ERR_RUNTIME)));
+        assert!(matches!(int(7).lua_idiv(&int(0)), Err(LuaError::Runtime)));
     }
 
     // --- lua_mod ---
@@ -459,7 +462,7 @@ mod tests {
 
     #[test]
     fn mod_by_zero() {
-        assert!(matches!(int(7).lua_mod(&int(0)), Err(LuaError::ERR_RUNTIME)));
+        assert!(matches!(int(7).lua_mod(&int(0)), Err(LuaError::Runtime)));
     }
 
     // --- lua_unm ---
@@ -489,14 +492,17 @@ mod tests {
 
     #[test]
     fn concat_nil_is_err_type() {
-        assert!(matches!(LuaValue::Nil.lua_concat(&s("x")), Err(LuaError::ERR_TYPE)));
+        assert!(matches!(
+            LuaValue::Nil.lua_concat(&s("x")),
+            Err(LuaError::Type)
+        ));
     }
 
     #[test]
     fn concat_result_over_max_len_is_err_mem() {
         let big = LuaValue::String(LuaString(Arc::from(vec![b'a'; 40000].as_slice())));
         let also_big = LuaValue::String(LuaString(Arc::from(vec![b'b'; 40000].as_slice())));
-        assert!(matches!(big.lua_concat(&also_big), Err(LuaError::ERR_MEM)));
+        assert!(matches!(big.lua_concat(&also_big), Err(LuaError::Memory)));
     }
 
     // --- lua_len ---
@@ -521,7 +527,7 @@ mod tests {
 
     #[test]
     fn len_nil_is_err_type() {
-        assert!(matches!(LuaValue::Nil.lua_len(), Err(LuaError::ERR_TYPE)));
+        assert!(matches!(LuaValue::Nil.lua_len(), Err(LuaError::Type)));
     }
 
     // --- to_lua_string ---
@@ -535,7 +541,11 @@ mod tests {
         assert_eq!(s("hello").to_lua_string(), ls("hello"));
         assert_eq!(make_table().to_lua_string(), ls("table"));
         assert_eq!(
-            LuaValue::Function(LuaClosure { proto_idx: 0, upvalues: vec![] }).to_lua_string(),
+            LuaValue::Function(LuaClosure {
+                proto_idx: 0,
+                upvalues: vec![]
+            })
+            .to_lua_string(),
             ls("function")
         );
     }
@@ -566,12 +576,12 @@ mod tests {
 
     #[test]
     fn into_key_nil_is_err_runtime() {
-        assert!(matches!(LuaValue::Nil.into_key(), Err(LuaError::ERR_RUNTIME)));
+        assert!(matches!(LuaValue::Nil.into_key(), Err(LuaError::Runtime)));
     }
 
     #[test]
     fn into_key_table_is_err_type() {
-        assert!(matches!(make_table().into_key(), Err(LuaError::ERR_TYPE)));
+        assert!(matches!(make_table().into_key(), Err(LuaError::Type)));
     }
 
     // --- LuaString ---
@@ -580,11 +590,14 @@ mod tests {
     fn lua_string_over_max_len() {
         // from_bytes currently infallible; this test will guide adding the length check
         let big = vec![0u8; 65537];
-        // When the 64KB cap is enforced, this should return Err(LuaError::ERR_MEM).
+        // When the 64KB cap is enforced, this should return Err(LuaError::Memory).
         // For now it succeeds — this test documents the expected future behaviour.
         let result = std::panic::catch_unwind(|| LuaString::from_bytes(&big));
         // Currently succeeds (no cap yet); mark as expected to change:
-        assert!(result.is_ok(), "from_bytes should not panic; cap enforcement pending");
+        assert!(
+            result.is_ok(),
+            "from_bytes should not panic; cap enforcement pending"
+        );
     }
 
     #[test]

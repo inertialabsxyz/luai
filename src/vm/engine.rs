@@ -7,8 +7,8 @@ use crate::{
         value::{LuaClosure, LuaError, LuaString, LuaValue},
     },
     vm::{
-        gas::{gas_cost, GasMeter, VmError},
-        memory::{alloc_size, MemoryMeter},
+        gas::{GasMeter, VmError, gas_cost},
+        memory::{MemoryMeter, alloc_size},
     },
 };
 
@@ -181,7 +181,8 @@ impl<H: HostInterface> Vm<H> {
 
         // Push the top-level chunk (prototype 0).
         let proto0 = &program.prototypes[0];
-        self.mem.track_alloc(alloc_size::stack_frame(proto0.local_count))?;
+        self.mem
+            .track_alloc(alloc_size::stack_frame(proto0.local_count))?;
 
         // Push locals (params + nils) for the top-level frame.
         let base = 0;
@@ -213,8 +214,11 @@ impl<H: HostInterface> Vm<H> {
 
             if pc >= code_len {
                 // Implicit return nil at end of function.
-                match self.do_return(program, 0) {
-                    Ok(Some(v)) => { return_value = v; break; }
+                match self.do_return(0) {
+                    Ok(Some(v)) => {
+                        return_value = v;
+                        break;
+                    }
                     Ok(None) => {}
                     Err(e) => return Err(e),
                 }
@@ -228,7 +232,10 @@ impl<H: HostInterface> Vm<H> {
             self.frames.last_mut().unwrap().pc += 1;
 
             match self.dispatch(program, instr) {
-                Ok(Some(v)) => { return_value = v; break; }
+                Ok(Some(v)) => {
+                    return_value = v;
+                    break;
+                }
                 Ok(None) => {}
                 Err(e) => return Err(e),
             }
@@ -308,11 +315,7 @@ impl<H: HostInterface> Vm<H> {
             }
 
             Instruction::LoadUp(idx) => {
-                let val = self
-                    .frames
-                    .last()
-                    .unwrap()
-                    .upvalues[idx as usize]
+                let val = self.frames.last().unwrap().upvalues[idx as usize]
                     .0
                     .borrow()
                     .clone();
@@ -321,7 +324,9 @@ impl<H: HostInterface> Vm<H> {
 
             Instruction::StoreUp(idx) => {
                 let val = self.pop_value()?;
-                *self.frames.last().unwrap().upvalues[idx as usize].0.borrow_mut() = val;
+                *self.frames.last().unwrap().upvalues[idx as usize]
+                    .0
+                    .borrow_mut() = val;
             }
 
             Instruction::NewTable => {
@@ -463,7 +468,12 @@ impl<H: HostInterface> Vm<H> {
             Instruction::And(offset) => {
                 // Short-circuit: if top is falsy, jump (leave falsy on stack).
                 // If truthy, pop it (right side will be evaluated).
-                let top = self.stack.last().ok_or_else(stack_underflow)?.as_value()?.clone();
+                let top = self
+                    .stack
+                    .last()
+                    .ok_or_else(stack_underflow)?
+                    .as_value()?
+                    .clone();
                 if !top.is_truthy() {
                     self.jump_by(offset);
                 } else {
@@ -474,7 +484,12 @@ impl<H: HostInterface> Vm<H> {
             Instruction::Or(offset) => {
                 // Short-circuit: if top is truthy, jump (leave truthy on stack).
                 // If falsy, pop it (right side will be evaluated).
-                let top = self.stack.last().ok_or_else(stack_underflow)?.as_value()?.clone();
+                let top = self
+                    .stack
+                    .last()
+                    .ok_or_else(stack_underflow)?
+                    .as_value()?
+                    .clone();
                 if top.is_truthy() {
                     self.jump_by(offset);
                 } else {
@@ -553,7 +568,7 @@ impl<H: HostInterface> Vm<H> {
 
             Instruction::Ret(n) => {
                 self.gas.charge(gas_cost::FUNCTION_RETURN)?;
-                match self.do_return(program, n as usize) {
+                match self.do_return(n as usize) {
                     Ok(Some(v)) => return Ok(Some(v)),
                     Ok(None) => {}
                     Err(e) => return Err(e),
@@ -584,7 +599,9 @@ impl<H: HostInterface> Vm<H> {
                                 }
                                 StackSlot::IterHandle(_) => {
                                     return Err(VmError::RuntimeError(LuaValue::String(
-                                        LuaString::from_str("cannot capture iterator handle as upvalue"),
+                                        LuaString::from_str(
+                                            "cannot capture iterator handle as upvalue",
+                                        ),
                                     )));
                                 }
                             };
@@ -601,7 +618,8 @@ impl<H: HostInterface> Vm<H> {
                     proto_idx: proto_idx as usize,
                     upvalues: upvalues.iter().map(|u| u.0.clone()).collect(),
                 };
-                self.stack.push(StackSlot::Value(LuaValue::Function(closure)));
+                self.stack
+                    .push(StackSlot::Value(LuaValue::Function(closure)));
 
                 // Store upvalues back for LoadUp/StoreUp in the calling frame
                 // Note: we don't need to do anything special because closures
@@ -633,16 +651,18 @@ impl<H: HostInterface> Vm<H> {
                         // Type error trying to call a non-function.
                         let vm_err = VmError::from(e);
                         self.stack.push(StackSlot::Value(LuaValue::Boolean(false)));
-                        self.stack.push(StackSlot::Value(error_to_lua_value(vm_err)));
+                        self.stack
+                            .push(StackSlot::Value(error_to_lua_value(vm_err)));
                         return Ok(None);
                     }
                 };
 
                 if self.frames.len() >= self.config.max_call_depth {
                     self.stack.push(StackSlot::Value(LuaValue::Boolean(false)));
-                    self.stack.push(StackSlot::Value(LuaValue::String(
-                        LuaString::from_str("call depth exceeded"),
-                    )));
+                    self.stack
+                        .push(StackSlot::Value(LuaValue::String(LuaString::from_str(
+                            "call depth exceeded",
+                        ))));
                     return Ok(None);
                 }
 
@@ -653,8 +673,7 @@ impl<H: HostInterface> Vm<H> {
 
                 match result {
                     Ok(ret_val) => {
-                        self.stack
-                            .push(StackSlot::Value(LuaValue::Boolean(true)));
+                        self.stack.push(StackSlot::Value(LuaValue::Boolean(true)));
                         self.stack.push(StackSlot::Value(ret_val));
                     }
                     Err(e) if e.is_unrecoverable() => return Err(e),
@@ -664,8 +683,7 @@ impl<H: HostInterface> Vm<H> {
                         self.stack.truncate(checkpoint.stack_len);
                         self.frames.truncate(checkpoint.frame_len);
                         let err_val = error_to_lua_value(e);
-                        self.stack
-                            .push(StackSlot::Value(LuaValue::Boolean(false)));
+                        self.stack.push(StackSlot::Value(LuaValue::Boolean(false)));
                         self.stack.push(StackSlot::Value(err_val));
                     }
                 }
@@ -712,9 +730,7 @@ impl<H: HostInterface> Vm<H> {
                         }
                         self.total_tool_bytes_out += resp_bytes;
                         self.gas.charge(
-                            gas_cost::TOOL_CALL_BASE
-                                + args_bytes as u64
-                                + resp_bytes as u64,
+                            gas_cost::TOOL_CALL_BASE + args_bytes as u64 + resp_bytes as u64,
                         )?;
                         let t = Rc::new(RefCell::new(resp_table));
                         self.stack.push(StackSlot::Value(LuaValue::Table(t)));
@@ -751,12 +767,11 @@ impl<H: HostInterface> Vm<H> {
                 if n == 0 {
                     self.jump_by(offset);
                 } else {
-                    self.stack
-                        .push(StackSlot::IterHandle(IterHandle::Sorted {
-                            keys,
-                            index: 0,
-                            table: t,
-                        }));
+                    self.stack.push(StackSlot::IterHandle(IterHandle::Sorted {
+                        keys,
+                        index: 0,
+                        table: t,
+                    }));
                 }
             }
 
@@ -769,8 +784,10 @@ impl<H: HostInterface> Vm<H> {
                 if first.is_none() {
                     self.jump_by(offset);
                 } else {
-                    self.stack
-                        .push(StackSlot::IterHandle(IterHandle::Array { table: t, index: 1 }));
+                    self.stack.push(StackSlot::IterHandle(IterHandle::Array {
+                        table: t,
+                        index: 1,
+                    }));
                 }
             }
 
@@ -791,7 +808,11 @@ impl<H: HostInterface> Vm<H> {
                 };
 
                 match handle {
-                    IterHandle::Sorted { keys, mut index, table } => {
+                    IterHandle::Sorted {
+                        keys,
+                        mut index,
+                        table,
+                    } => {
                         if index >= keys.len() {
                             // Exhausted: don't put handle back, jump.
                             self.jump_by(offset);
@@ -858,14 +879,18 @@ impl<H: HostInterface> Vm<H> {
             RawsetResult::Updated => {
                 self.gas.charge(gas_cost::TABLE_SET_EXISTING)?;
             }
-            RawsetResult::Inserted { grew, new_hash_capacity } => {
+            RawsetResult::Inserted {
+                grew,
+                new_hash_capacity,
+            } => {
                 self.gas.charge(gas_cost::TABLE_SET_NEW_KEY)?;
                 if grew {
                     // Gas: new_capacity (entries_after_rehash)
                     self.gas.charge(new_hash_capacity as u64)?;
                     // Memory: delta capacity * 40
                     let delta = new_hash_capacity.saturating_sub(old_cap) as u64;
-                    self.mem.track_alloc(delta * alloc_size::table_hash_slot())?;
+                    self.mem
+                        .track_alloc(delta * alloc_size::table_hash_slot())?;
                 } else {
                     // Array slot inserted: charge array slot memory.
                     self.mem.track_alloc(alloc_size::table_array_slot())?;
@@ -884,16 +909,13 @@ impl<H: HostInterface> Vm<H> {
         expected_returns: u8,
     ) -> Result<(), VmError> {
         let proto = &program.prototypes[closure.proto_idx];
-        self.mem.track_alloc(alloc_size::stack_frame(proto.local_count))?;
+        self.mem
+            .track_alloc(alloc_size::stack_frame(proto.local_count))?;
 
         let base = self.stack.len();
 
         // Build upvalue slots from the closure's Rc cells.
-        let upvalues: Vec<UpvalueSlot> = closure
-            .upvalues
-            .into_iter()
-            .map(UpvalueSlot)
-            .collect();
+        let upvalues: Vec<UpvalueSlot> = closure.upvalues.into_iter().map(UpvalueSlot).collect();
 
         let frame = CallFrame {
             proto_idx: closure.proto_idx,
@@ -921,11 +943,7 @@ impl<H: HostInterface> Vm<H> {
 
     /// Handle Ret(n): collect return values, pop frame, push results to parent.
     /// Returns Ok(Some(v)) if this was the last frame (done), Ok(None) to continue.
-    fn do_return(
-        &mut self,
-        program: &CompiledProgram,
-        n: usize,
-    ) -> Result<Option<LuaValue>, VmError> {
+    fn do_return(&mut self, n: usize) -> Result<Option<LuaValue>, VmError> {
         // Collect return values.
         let mut ret_vals: Vec<LuaValue> = Vec::with_capacity(n);
         for _ in 0..n {
@@ -971,7 +989,7 @@ impl<H: HostInterface> Vm<H> {
             let code_len = program.prototypes[proto_idx].code.len();
 
             if pc >= code_len {
-                match self.do_return(program, 0)? {
+                match self.do_return(0)? {
                     Some(v) => return Ok(v),
                     None => {}
                 }
@@ -999,10 +1017,7 @@ impl<H: HostInterface> Vm<H> {
     }
 
     fn pop_value(&mut self) -> Result<LuaValue, VmError> {
-        self.stack
-            .pop()
-            .ok_or_else(stack_underflow)?
-            .into_value()
+        self.stack.pop().ok_or_else(stack_underflow)?.into_value()
     }
 
     fn jump_by(&mut self, offset: i16) {
@@ -1041,9 +1056,7 @@ fn error_to_lua_value(e: VmError) -> LuaValue {
         VmError::RuntimeError(v) => v,
         VmError::TypeError(s) => LuaValue::String(LuaString::from_str(&s)),
         VmError::ToolError(s) => LuaValue::String(LuaString::from_str(&s)),
-        VmError::CallDepthExceeded => {
-            LuaValue::String(LuaString::from_str("call depth exceeded"))
-        }
+        VmError::CallDepthExceeded => LuaValue::String(LuaString::from_str("call depth exceeded")),
         VmError::GasExhausted => LuaValue::String(LuaString::from_str("gas exhausted")),
         VmError::MemoryExhausted => LuaValue::String(LuaString::from_str("memory exhausted")),
         VmError::OutputExceeded => LuaValue::String(LuaString::from_str("output exceeded")),
@@ -1099,11 +1112,11 @@ fn ceil_log2(n: usize) -> u64 {
 impl From<LuaError> for VmError {
     fn from(e: LuaError) -> Self {
         match e {
-            LuaError::ERR_TYPE => VmError::TypeError("type error".into()),
-            LuaError::ERR_MEM => VmError::MemoryExhausted,
-            LuaError::ERR_RUNTIME => VmError::RuntimeError(LuaValue::String(
-                LuaString::from_str("runtime error"),
-            )),
+            LuaError::Type => VmError::TypeError("type error".into()),
+            LuaError::Memory => VmError::MemoryExhausted,
+            LuaError::Runtime => {
+                VmError::RuntimeError(LuaValue::String(LuaString::from_str("runtime error")))
+            }
         }
     }
 }
@@ -1114,9 +1127,9 @@ impl From<LuaError> for VmError {
 mod tests {
     use super::*;
     use crate::{
+        bytecode,
         compiler::{self, proto::CompiledProgram},
         parser,
-        bytecode,
     };
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -1133,17 +1146,20 @@ mod tests {
     fn compile_and_run_with_config(source: &str, config: VmConfig) -> Result<LuaValue, VmError> {
         let ast = parser::parse(source).map_err(|e| {
             VmError::RuntimeError(LuaValue::String(LuaString::from_str(&format!(
-                "parse error: {:?}", e
+                "parse error: {:?}",
+                e
             ))))
         })?;
         let program = compiler::compile(&ast).map_err(|e| {
             VmError::RuntimeError(LuaValue::String(LuaString::from_str(&format!(
-                "compile error: {:?}", e
+                "compile error: {:?}",
+                e
             ))))
         })?;
         bytecode::verify(&program).map_err(|e| {
             VmError::RuntimeError(LuaValue::String(LuaString::from_str(&format!(
-                "verify error: {:?}", e
+                "verify error: {:?}",
+                e
             ))))
         })?;
         let mut vm = Vm::new(config, NoopHost);
@@ -1152,7 +1168,7 @@ mod tests {
     }
 
     fn make_simple_program(instrs: Vec<Instruction>, constants: Vec<Constant>) -> CompiledProgram {
-        use crate::compiler::proto::{FunctionProto};
+        use crate::compiler::proto::FunctionProto;
         let mut proto = FunctionProto::new(0);
         proto.code = instrs;
         proto.constants = constants;
@@ -1197,22 +1213,28 @@ mod tests {
 
     #[test]
     fn exec_settable_gettable() {
-        let result = compile_and_run(r#"
+        let result = compile_and_run(
+            r#"
             local t = {}
             t["x"] = 10
             return t["x"]
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         assert_eq!(result, LuaValue::Integer(10));
     }
 
     #[test]
     fn exec_call_simple() {
-        let result = compile_and_run(r#"
+        let result = compile_and_run(
+            r#"
             local function add1(n)
                 return n + 1
             end
             return add1(5)
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         assert_eq!(result, LuaValue::Integer(6));
     }
 
@@ -1225,7 +1247,8 @@ mod tests {
     #[test]
     fn exec_jmp_forward() {
         // Jump over an assignment, verify the un-overwritten value is returned.
-        let result = compile_and_run(r#"
+        let result = compile_and_run(
+            r#"
             local x = 5
             do
                 -- use a do-block to skip to a local
@@ -1235,31 +1258,39 @@ mod tests {
                 end
             end
             return x
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         assert_eq!(result, LuaValue::Integer(5));
     }
 
     #[test]
     fn exec_jmpifnot() {
-        let result = compile_and_run(r#"
+        let result = compile_and_run(
+            r#"
             local x = 99
             if false then
                 x = 0
             end
             return x
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         assert_eq!(result, LuaValue::Integer(99));
     }
 
     #[test]
     fn exec_closure_upvalue() {
-        let result = compile_and_run(r#"
+        let result = compile_and_run(
+            r#"
             local x = 42
             local function get_x()
                 return x
             end
             return get_x()
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         assert_eq!(result, LuaValue::Integer(42));
     }
 
@@ -1340,10 +1371,7 @@ mod tests {
     fn gas_charged_for_concat() {
         // Concat(2) of "hello"+"world" = 10 chars, gas = 10 (len).
         let result = compile_and_run(r#"return "hello" .. "world""#).unwrap();
-        assert_eq!(
-            result,
-            LuaValue::String(LuaString::from_str("helloworld"))
-        );
+        assert_eq!(result, LuaValue::String(LuaString::from_str("helloworld")));
     }
 
     #[test]
@@ -1362,38 +1390,44 @@ mod tests {
 
     #[test]
     fn pcall_catches_type_error() {
-        let result = compile_and_run(r#"
+        let result = compile_and_run(
+            r#"
             local ok, err = pcall(function()
                 local x = 1 + "hello"
                 return x
             end)
             if ok then return 1 else return 0 end
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         assert_eq!(result, LuaValue::Integer(0));
     }
 
     #[test]
     fn pcall_catches_runtime_error() {
-        let result = compile_and_run(r#"
+        let result = compile_and_run(
+            r#"
             local ok, err = pcall(function()
                 error("boom")
             end)
             if ok then return "ok" else return err end
-        "#).unwrap();
-        assert_eq!(
-            result,
-            LuaValue::String(LuaString::from_str("boom"))
-        );
+        "#,
+        )
+        .unwrap();
+        assert_eq!(result, LuaValue::String(LuaString::from_str("boom")));
     }
 
     #[test]
     fn pcall_success_returns_true_result() {
-        let result = compile_and_run(r#"
+        let result = compile_and_run(
+            r#"
             local ok, val = pcall(function()
                 return 42
             end)
             if ok then return val else return -1 end
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         assert_eq!(result, LuaValue::Integer(42));
     }
 
@@ -1419,12 +1453,15 @@ mod tests {
     #[test]
     fn pcall_unwind_cleans_stack() {
         // After pcall catches an error, we can still compute normally.
-        let result = compile_and_run(r#"
+        let result = compile_and_run(
+            r#"
             local ok, err = pcall(function()
                 error("oops")
             end)
             return 99
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         assert_eq!(result, LuaValue::Integer(99));
     }
 
@@ -1433,14 +1470,16 @@ mod tests {
     #[test]
     fn iter_sorted_empty_table() {
         // pairs on empty table: body never executes.
-        let result = compile_and_run(r#"
+        let result = compile_and_run(
+            r#"
             local t = {}
             local count = 0
             for k, v in pairs(t) do
                 count = count + 1
             end
             return count
-        "#);
+        "#,
+        );
         // pairs() is a stdlib builtin (Phase 7) - not available yet.
         // Test using IterInitSorted directly via a minimal bytecode program.
         // We test this at the bytecode level instead.
@@ -1455,12 +1494,12 @@ mod tests {
         // Empty table → jump_by(offset) → new_pc = 2 + offset.
         // We want to land at pc=4 (Ret(0)), so offset = 4-2 = 2.
         proto.code = vec![
-            Instruction::NewTable,           // 0: push empty table
-            Instruction::IterInitSorted(2),  // 1: if empty → pc 2+2=4
+            Instruction::NewTable,          // 0: push empty table
+            Instruction::IterInitSorted(2), // 1: if empty → pc 2+2=4
             // body (unreachable for empty table):
-            Instruction::PushK(0),           // 2: unreachable
-            Instruction::Ret(1),             // 3: unreachable
-            Instruction::Ret(0),             // 4: done - return nil
+            Instruction::PushK(0), // 2: unreachable
+            Instruction::Ret(1),   // 3: unreachable
+            Instruction::Ret(0),   // 4: done - return nil
         ];
         proto.constants = vec![Constant::Integer(999)];
         let program = CompiledProgram {
@@ -1499,11 +1538,11 @@ mod tests {
         let mut proto = FunctionProto::new(0);
         proto.local_count = 3; // local 0 = table, local 1 = sum, local 2 = unused
         proto.constants = vec![
-            Constant::String(b"a".to_vec()),  // 0
-            Constant::Integer(10),            // 1
-            Constant::String(b"b".to_vec()),  // 2
-            Constant::Integer(20),            // 3
-            Constant::Integer(0),             // 4 (initial sum)
+            Constant::String(b"a".to_vec()), // 0
+            Constant::Integer(10),           // 1
+            Constant::String(b"b".to_vec()), // 2
+            Constant::Integer(20),           // 3
+            Constant::Integer(0),            // 4 (initial sum)
         ];
 
         // Index layout:
@@ -1567,28 +1606,28 @@ mod tests {
         // 19: Ret(1)
 
         proto.code = vec![
-            Instruction::NewTable,                  // 0
-            Instruction::StoreLocal(0),             // 1
-            Instruction::LoadLocal(0),              // 2
-            Instruction::PushK(1),                  // 3 (10)
-            Instruction::SetField(0),               // 4 (.a)
-            Instruction::LoadLocal(0),              // 5
-            Instruction::PushK(3),                  // 6 (20)
-            Instruction::SetField(2),               // 7 (.b)
-            Instruction::PushK(4),                  // 8 (0)
-            Instruction::StoreLocal(1),             // 9
-            Instruction::LoadLocal(0),              // 10
-            Instruction::IterInitSorted(6),         // 11: if empty, jump to 18
+            Instruction::NewTable,          // 0
+            Instruction::StoreLocal(0),     // 1
+            Instruction::LoadLocal(0),      // 2
+            Instruction::PushK(1),          // 3 (10)
+            Instruction::SetField(0),       // 4 (.a)
+            Instruction::LoadLocal(0),      // 5
+            Instruction::PushK(3),          // 6 (20)
+            Instruction::SetField(2),       // 7 (.b)
+            Instruction::PushK(4),          // 8 (0)
+            Instruction::StoreLocal(1),     // 9
+            Instruction::LoadLocal(0),      // 10
+            Instruction::IterInitSorted(6), // 11: if empty, jump to 18
             // loop_start = 12
-            Instruction::IterNext(5),               // 12: if done, jump to 18
-                                                     //     pc after = 13, target = 13+5 = 18 ✓
-            Instruction::LoadLocal(1),              // 13
-            Instruction::Add,                       // 14  (value + sum)
-            Instruction::StoreLocal(1),             // 15
-            Instruction::Pop,                       // 16 (pop key)
-            Instruction::Jmp(-6),                   // 17: pc after = 18, target = 18-6 = 12 ✓
-            Instruction::LoadLocal(1),              // 18
-            Instruction::Ret(1),                    // 19
+            Instruction::IterNext(5), // 12: if done, jump to 18
+            //     pc after = 13, target = 13+5 = 18 ✓
+            Instruction::LoadLocal(1),  // 13
+            Instruction::Add,           // 14  (value + sum)
+            Instruction::StoreLocal(1), // 15
+            Instruction::Pop,           // 16 (pop key)
+            Instruction::Jmp(-6),       // 17: pc after = 18, target = 18-6 = 12 ✓
+            Instruction::LoadLocal(1),  // 18
+            Instruction::Ret(1),        // 19
         ];
 
         let program = CompiledProgram {
@@ -1608,10 +1647,10 @@ mod tests {
         let mut proto = FunctionProto::new(0);
         proto.local_count = 2; // local 0 = table, local 1 = sum
         proto.constants = vec![
-            Constant::Integer(10),   // 0
-            Constant::Integer(20),   // 1
-            Constant::Integer(30),   // 2
-            Constant::Integer(0),    // 3 (initial sum)
+            Constant::Integer(10), // 0
+            Constant::Integer(20), // 1
+            Constant::Integer(30), // 2
+            Constant::Integer(0),  // 3 (initial sum)
         ];
 
         // 0:  NewTable
@@ -1635,13 +1674,13 @@ mod tests {
         // Let me add Integer(1), Integer(2), Integer(3) as constants.
 
         proto.constants = vec![
-            Constant::Integer(1),    // 0 - key 1
-            Constant::Integer(10),   // 1 - value 10
-            Constant::Integer(2),    // 2 - key 2
-            Constant::Integer(20),   // 3 - value 20
-            Constant::Integer(3),    // 4 - key 3
-            Constant::Integer(30),   // 5 - value 30
-            Constant::Integer(0),    // 6 - initial sum
+            Constant::Integer(1),  // 0 - key 1
+            Constant::Integer(10), // 1 - value 10
+            Constant::Integer(2),  // 2 - key 2
+            Constant::Integer(20), // 3 - value 20
+            Constant::Integer(3),  // 4 - key 3
+            Constant::Integer(30), // 5 - value 30
+            Constant::Integer(0),  // 6 - initial sum
         ];
 
         // 0:  NewTable
@@ -1692,45 +1731,45 @@ mod tests {
         // 17: IterInitArray(+6)  pc after=18, target=18+6=24 ✓
 
         proto.code = vec![
-            Instruction::NewTable,           // 0
-            Instruction::StoreLocal(0),      // 1
-            Instruction::LoadLocal(0),       // 2
-            Instruction::PushK(0),           // 3 (key 1)
-            Instruction::PushK(1),           // 4 (val 10)
-            Instruction::SetTable,           // 5
-            Instruction::LoadLocal(0),       // 6
-            Instruction::PushK(2),           // 7 (key 2)
-            Instruction::PushK(3),           // 8 (val 20)
-            Instruction::SetTable,           // 9
-            Instruction::LoadLocal(0),       // 10
-            Instruction::PushK(4),           // 11 (key 3)
-            Instruction::PushK(5),           // 12 (val 30)
-            Instruction::SetTable,           // 13
-            Instruction::PushK(6),           // 14 (sum=0)
-            Instruction::StoreLocal(1),      // 15
-            Instruction::LoadLocal(0),       // 16
-            Instruction::IterInitArray(7),   // 17: if empty → 18+7=25; pc after=18
+            Instruction::NewTable,         // 0
+            Instruction::StoreLocal(0),    // 1
+            Instruction::LoadLocal(0),     // 2
+            Instruction::PushK(0),         // 3 (key 1)
+            Instruction::PushK(1),         // 4 (val 10)
+            Instruction::SetTable,         // 5
+            Instruction::LoadLocal(0),     // 6
+            Instruction::PushK(2),         // 7 (key 2)
+            Instruction::PushK(3),         // 8 (val 20)
+            Instruction::SetTable,         // 9
+            Instruction::LoadLocal(0),     // 10
+            Instruction::PushK(4),         // 11 (key 3)
+            Instruction::PushK(5),         // 12 (val 30)
+            Instruction::SetTable,         // 13
+            Instruction::PushK(6),         // 14 (sum=0)
+            Instruction::StoreLocal(1),    // 15
+            Instruction::LoadLocal(0),     // 16
+            Instruction::IterInitArray(7), // 17: if empty → 18+7=25; pc after=18
             // loop_start = 18
-            Instruction::IterNext(6),        // 18: if done → 19+6=25; pc after=19
-                                              //     stack: handle, index, value
-            Instruction::LoadLocal(1),       // 19
-            Instruction::Add,                // 20
-            Instruction::StoreLocal(1),      // 21
-            Instruction::Pop,                // 22 (pop index key)
-            Instruction::Jmp(-6),            // 23: pc after=24, target=24-6=18 ✓
+            Instruction::IterNext(6), // 18: if done → 19+6=25; pc after=19
+            //     stack: handle, index, value
+            Instruction::LoadLocal(1),  // 19
+            Instruction::Add,           // 20
+            Instruction::StoreLocal(1), // 21
+            Instruction::Pop,           // 22 (pop index key)
+            Instruction::Jmp(-6),       // 23: pc after=24, target=24-6=18 ✓
             // Hmm: Jmp(-6) at pc=23, pc after Jmp = 24, target = 24 + (-6) = 18. ✓
             // But IterNext at pc=18 jumps to 19+6=25 when done.
             // IterInitArray at pc=17 jumps to 18+7=25 if empty.
-            Instruction::LoadLocal(1),       // 24
-            Instruction::Ret(1),             // 25 -- unreachable if we jump to 25 which is this.
-                                              // Wait: jump targets 25 but code has index 24 and 25.
-                                              // Let me re-examine: IterNext done → jump to index 25.
-                                              // But LoadLocal(1) is at index 24, Ret(1) at 25.
-                                              // We want to jump to 24, not 25!
+            Instruction::LoadLocal(1), // 24
+            Instruction::Ret(1),       // 25 -- unreachable if we jump to 25 which is this.
+                                       // Wait: jump targets 25 but code has index 24 and 25.
+                                       // Let me re-examine: IterNext done → jump to index 25.
+                                       // But LoadLocal(1) is at index 24, Ret(1) at 25.
+                                       // We want to jump to 24, not 25!
         ];
         // Fix: IterNext offset should be 24-19 = 5, IterInitArray offset = 24-18 = 6.
         proto.code[17] = Instruction::IterInitArray(6); // pc after=18, target=18+6=24 ✓
-        proto.code[18] = Instruction::IterNext(5);       // pc after=19, target=19+5=24 ✓
+        proto.code[18] = Instruction::IterNext(5); // pc after=19, target=19+5=24 ✓
         // Fix Jmp: pc=23, pc after=24, target=18 → offset = 18-24 = -6 ✓ (already correct)
 
         let program = CompiledProgram {
@@ -1750,38 +1789,38 @@ mod tests {
         let mut proto = FunctionProto::new(0);
         proto.local_count = 2;
         proto.constants = vec![
-            Constant::Integer(1),   // 0 - key 1
-            Constant::Integer(10),  // 1 - value 10
-            Constant::Integer(3),   // 2 - key 3
-            Constant::Integer(30),  // 3 - value 30
-            Constant::Integer(0),   // 4 - sum init
+            Constant::Integer(1),  // 0 - key 1
+            Constant::Integer(10), // 1 - value 10
+            Constant::Integer(3),  // 2 - key 3
+            Constant::Integer(30), // 3 - value 30
+            Constant::Integer(0),  // 4 - sum init
         ];
 
         // Similar to iter_array_basic but only t[1] and t[3] set (gap at 2).
         proto.code = vec![
-            Instruction::NewTable,           // 0
-            Instruction::StoreLocal(0),      // 1
-            Instruction::LoadLocal(0),       // 2
-            Instruction::PushK(0),           // 3 (key 1)
-            Instruction::PushK(1),           // 4 (val 10)
-            Instruction::SetTable,           // 5
-            Instruction::LoadLocal(0),       // 6
-            Instruction::PushK(2),           // 7 (key 3)
-            Instruction::PushK(3),           // 8 (val 30)
-            Instruction::SetTable,           // 9
-            Instruction::PushK(4),           // 10 (sum=0)
-            Instruction::StoreLocal(1),      // 11
-            Instruction::LoadLocal(0),       // 12
-            Instruction::IterInitArray(6),   // 13: pc after=14, empty → 14+6=20
+            Instruction::NewTable,         // 0
+            Instruction::StoreLocal(0),    // 1
+            Instruction::LoadLocal(0),     // 2
+            Instruction::PushK(0),         // 3 (key 1)
+            Instruction::PushK(1),         // 4 (val 10)
+            Instruction::SetTable,         // 5
+            Instruction::LoadLocal(0),     // 6
+            Instruction::PushK(2),         // 7 (key 3)
+            Instruction::PushK(3),         // 8 (val 30)
+            Instruction::SetTable,         // 9
+            Instruction::PushK(4),         // 10 (sum=0)
+            Instruction::StoreLocal(1),    // 11
+            Instruction::LoadLocal(0),     // 12
+            Instruction::IterInitArray(6), // 13: pc after=14, empty → 14+6=20
             // loop = 14
-            Instruction::IterNext(5),        // 14: pc after=15, done → 15+5=20
-            Instruction::LoadLocal(1),       // 15
-            Instruction::Add,                // 16
-            Instruction::StoreLocal(1),      // 17
-            Instruction::Pop,                // 18 (pop key)
-            Instruction::Jmp(-6),            // 19: pc after=20, target=20-6=14 ✓
-            Instruction::LoadLocal(1),       // 20
-            Instruction::Ret(1),             // 21
+            Instruction::IterNext(5),   // 14: pc after=15, done → 15+5=20
+            Instruction::LoadLocal(1),  // 15
+            Instruction::Add,           // 16
+            Instruction::StoreLocal(1), // 17
+            Instruction::Pop,           // 18 (pop key)
+            Instruction::Jmp(-6),       // 19: pc after=20, target=20-6=14 ✓
+            Instruction::LoadLocal(1),  // 20
+            Instruction::Ret(1),        // 21
         ];
 
         let program = CompiledProgram {
@@ -1802,29 +1841,37 @@ mod tests {
         let mut proto = FunctionProto::new(0);
         proto.local_count = 1;
         proto.constants = vec![
-            Constant::String(b"a".to_vec()),  // 0
-            Constant::Integer(1),             // 1
-            Constant::String(b"b".to_vec()),  // 2
-            Constant::Integer(2),             // 3
-            Constant::String(b"c".to_vec()),  // 4
-            Constant::Integer(3),             // 5
-            Constant::String(b"d".to_vec()),  // 6
-            Constant::Integer(4),             // 7
+            Constant::String(b"a".to_vec()), // 0
+            Constant::Integer(1),            // 1
+            Constant::String(b"b".to_vec()), // 2
+            Constant::Integer(2),            // 3
+            Constant::String(b"c".to_vec()), // 4
+            Constant::Integer(3),            // 5
+            Constant::String(b"d".to_vec()), // 6
+            Constant::Integer(4),            // 7
         ];
 
         proto.code = vec![
-            Instruction::NewTable,           // 0
-            Instruction::StoreLocal(0),      // 1
-            Instruction::LoadLocal(0), Instruction::PushK(1), Instruction::SetField(0), // 2,3,4
-            Instruction::LoadLocal(0), Instruction::PushK(3), Instruction::SetField(2), // 5,6,7
-            Instruction::LoadLocal(0), Instruction::PushK(5), Instruction::SetField(4), // 8,9,10
-            Instruction::LoadLocal(0), Instruction::PushK(7), Instruction::SetField(6), // 11,12,13
-            Instruction::LoadLocal(0),       // 14
-            Instruction::IterInitSorted(1),  // 15: if empty jump to 17
+            Instruction::NewTable,      // 0
+            Instruction::StoreLocal(0), // 1
+            Instruction::LoadLocal(0),
+            Instruction::PushK(1),
+            Instruction::SetField(0), // 2,3,4
+            Instruction::LoadLocal(0),
+            Instruction::PushK(3),
+            Instruction::SetField(2), // 5,6,7
+            Instruction::LoadLocal(0),
+            Instruction::PushK(5),
+            Instruction::SetField(4), // 8,9,10
+            Instruction::LoadLocal(0),
+            Instruction::PushK(7),
+            Instruction::SetField(6),       // 11,12,13
+            Instruction::LoadLocal(0),      // 14
+            Instruction::IterInitSorted(1), // 15: if empty jump to 17
             // loop body (iterate once then handle exits)
-            Instruction::IterNext(2),        // 16: done → jump to 19
-            Instruction::Pop,                // 17: pop value
-            Instruction::Pop,                // 18: pop key  (then back to 16)
+            Instruction::IterNext(2), // 16: done → jump to 19
+            Instruction::Pop,         // 17: pop value
+            Instruction::Pop,         // 18: pop key  (then back to 16)
             // Hmm, we need a Jmp back after Pop
             // Let me fix: done → 17+2=19? pc after IterNext=17, target=17+2=19? No pc after 16 = 17.
             // IterNext at 16: pc after = 17, done → 17 + offset.
@@ -1833,34 +1880,34 @@ mod tests {
             // body: Pop(value), Pop(key), Jmp(-4): pc after=20, target=20-4=16
             // 19: Jmp(-4): pc after=20, 20-4=16 ✓
             // 20: Ret(0)
-            Instruction::Ret(0),             // 19 placeholder
+            Instruction::Ret(0), // 19 placeholder
         ];
 
         // Rebuild properly:
         proto.code = vec![
-            Instruction::NewTable,           // 0
-            Instruction::StoreLocal(0),      // 1
-            Instruction::LoadLocal(0),       // 2
-            Instruction::PushK(1),           // 3
-            Instruction::SetField(0),        // 4  t.a=1
-            Instruction::LoadLocal(0),       // 5
-            Instruction::PushK(3),           // 6
-            Instruction::SetField(2),        // 7  t.b=2
-            Instruction::LoadLocal(0),       // 8
-            Instruction::PushK(5),           // 9
-            Instruction::SetField(4),        // 10 t.c=3
-            Instruction::LoadLocal(0),       // 11
-            Instruction::PushK(7),           // 12
-            Instruction::SetField(6),        // 13 t.d=4
-            Instruction::LoadLocal(0),       // 14
-            Instruction::IterInitSorted(5),  // 15: pc after=16, empty→16+5=21
+            Instruction::NewTable,          // 0
+            Instruction::StoreLocal(0),     // 1
+            Instruction::LoadLocal(0),      // 2
+            Instruction::PushK(1),          // 3
+            Instruction::SetField(0),       // 4  t.a=1
+            Instruction::LoadLocal(0),      // 5
+            Instruction::PushK(3),          // 6
+            Instruction::SetField(2),       // 7  t.b=2
+            Instruction::LoadLocal(0),      // 8
+            Instruction::PushK(5),          // 9
+            Instruction::SetField(4),       // 10 t.c=3
+            Instruction::LoadLocal(0),      // 11
+            Instruction::PushK(7),          // 12
+            Instruction::SetField(6),       // 13 t.d=4
+            Instruction::LoadLocal(0),      // 14
+            Instruction::IterInitSorted(5), // 15: pc after=16, empty→16+5=21
             // loop = 16
-            Instruction::IterNext(4),        // 16: pc after=17, done→17+4=21
-            Instruction::Pop,                // 17 pop value
-            Instruction::Pop,                // 18 pop key
-            Instruction::Jmp(-4),            // 19: pc after=20, target=20-4=16 ✓
-            Instruction::Nop,                // 20 padding
-            Instruction::Ret(0),             // 21
+            Instruction::IterNext(4), // 16: pc after=17, done→17+4=21
+            Instruction::Pop,         // 17 pop value
+            Instruction::Pop,         // 18 pop key
+            Instruction::Jmp(-4),     // 19: pc after=20, target=20-4=16 ✓
+            Instruction::Nop,         // 20 padding
+            Instruction::Ret(0),      // 21
         ];
 
         let program = CompiledProgram {

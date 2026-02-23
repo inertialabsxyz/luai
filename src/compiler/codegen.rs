@@ -1,9 +1,9 @@
-use crate::parser::ast::{
-    AssignTarget, BinOpKind, Block, Call, Expr, FuncBody, FuncName, GenericFor, IfStmt,
-    LocalDecl, MethodCall, NumericFor, ReturnStmt, Stmt, TableField, UnOpKind, WhileStmt,
-};
 use super::error::CompileError;
 use super::proto::{Constant, FunctionProto, Instruction, UpvalueDesc};
+use crate::parser::ast::{
+    AssignTarget, BinOpKind, Block, Call, Expr, FuncBody, FuncName, GenericFor, IfStmt, LocalDecl,
+    MethodCall, NumericFor, ReturnStmt, Stmt, TableField, UnOpKind, WhileStmt,
+};
 
 // ---------------------------------------------------------------------------
 // Internal scope types
@@ -61,7 +61,10 @@ pub struct Compiler {
 
 impl Compiler {
     pub fn compile(block: &Block) -> Result<super::proto::CompiledProgram, CompileError> {
-        let mut c = Compiler { scopes: vec![], prototypes: vec![] };
+        let mut c = Compiler {
+            scopes: vec![],
+            prototypes: vec![],
+        };
         // Reserve slot 0 for the top-level chunk; nested functions will occupy 1..N.
         c.prototypes.push(FunctionProto::new(0)); // placeholder
         c.enter_function(0);
@@ -73,7 +76,10 @@ impl Compiler {
         // Overwrite the placeholder at index 0.
         c.prototypes[0] = proto;
         let program_hash = super::canonical_hash(&c.prototypes);
-        Ok(super::proto::CompiledProgram { prototypes: c.prototypes, program_hash })
+        Ok(super::proto::CompiledProgram {
+            prototypes: c.prototypes,
+            program_hash,
+        })
     }
 
     // -----------------------------------------------------------------------
@@ -91,7 +97,10 @@ impl Compiler {
     fn register_param(&mut self, name: &str, slot: u8) {
         let scope = self.current_scope_mut();
         let block = scope.blocks.last_mut().expect("no block");
-        block.push(LocalVar { name: name.to_string(), slot });
+        block.push(LocalVar {
+            name: name.to_string(),
+            slot,
+        });
     }
 
     fn exit_function(&mut self) -> FunctionProto {
@@ -133,7 +142,10 @@ impl Compiler {
             scope.max_locals = scope.next_slot;
         }
         let block = scope.blocks.last_mut().expect("no block");
-        block.push(LocalVar { name: name.to_string(), slot });
+        block.push(LocalVar {
+            name: name.to_string(),
+            slot,
+        });
         Ok(slot)
     }
 
@@ -160,7 +172,10 @@ impl Compiler {
     }
 
     fn pop_break_scope(&mut self) -> Vec<usize> {
-        self.current_scope_mut().break_patches.pop().unwrap_or_default()
+        self.current_scope_mut()
+            .break_patches
+            .pop()
+            .unwrap_or_default()
     }
 
     // -----------------------------------------------------------------------
@@ -262,14 +277,14 @@ impl Compiler {
         let offset = offset as i16;
         let scope = self.current_scope_mut();
         match &mut scope.proto.code[idx] {
-            Instruction::Jmp(o)       => *o = offset,
-            Instruction::JmpIf(o)     => *o = offset,
-            Instruction::JmpIfNot(o)  => *o = offset,
-            Instruction::And(o)       => *o = offset,
-            Instruction::Or(o)        => *o = offset,
+            Instruction::Jmp(o) => *o = offset,
+            Instruction::JmpIf(o) => *o = offset,
+            Instruction::JmpIfNot(o) => *o = offset,
+            Instruction::And(o) => *o = offset,
+            Instruction::Or(o) => *o = offset,
             Instruction::IterInitSorted(o) => *o = offset,
-            Instruction::IterInitArray(o)  => *o = offset,
-            Instruction::IterNext(o)  => *o = offset,
+            Instruction::IterInitArray(o) => *o = offset,
+            Instruction::IterNext(o) => *o = offset,
             other => panic!("patch_jump_to: not a jump: {:?}", other),
         }
     }
@@ -311,10 +326,6 @@ impl Compiler {
         Ok(idx)
     }
 
-    fn current_proto_count(&self) -> usize {
-        self.prototypes.len()
-    }
-
     // -----------------------------------------------------------------------
     // Statement compilation
     // -----------------------------------------------------------------------
@@ -333,17 +344,17 @@ impl Compiler {
 
     fn compile_stmt(&mut self, stmt: &Stmt) -> Result<(), CompileError> {
         match stmt {
-            Stmt::LocalDecl(d)          => self.compile_local_decl(d),
-            Stmt::Assign(a)             => self.compile_assign(a),
-            Stmt::If(i)                 => self.compile_if(i),
-            Stmt::While(w)              => self.compile_while(w),
-            Stmt::NumericFor(f)         => self.compile_numeric_for(f),
-            Stmt::GenericFor(f)         => self.compile_generic_for(f),
-            Stmt::FunctionDecl(f)       => self.compile_function_decl(f),
+            Stmt::LocalDecl(d) => self.compile_local_decl(d),
+            Stmt::Assign(a) => self.compile_assign(a),
+            Stmt::If(i) => self.compile_if(i),
+            Stmt::While(w) => self.compile_while(w),
+            Stmt::NumericFor(f) => self.compile_numeric_for(f),
+            Stmt::GenericFor(f) => self.compile_generic_for(f),
+            Stmt::FunctionDecl(f) => self.compile_function_decl(f),
             Stmt::LocalFunctionDecl(lf) => self.compile_local_function_decl(lf),
-            Stmt::ExprStmt(e)           => self.compile_expr_stmt(e),
-            Stmt::Break(span)           => self.compile_break(span.line),
-            Stmt::Do(d)                 => self.compile_block(&d.block),
+            Stmt::ExprStmt(e) => self.compile_expr_stmt(e),
+            Stmt::Break(span) => self.compile_break(span.line),
+            Stmt::Do(d) => self.compile_block(&d.block),
         }
     }
 
@@ -352,10 +363,7 @@ impl Compiler {
         let n_names = decl.names.len();
 
         // Special case: `local a, b = pcall(...)` — 2 names, 1 pcall expr.
-        if n_names == 2
-            && decl.values.len() == 1
-            && is_pcall_expr(&decl.values[0])
-        {
+        if n_names == 2 && decl.values.len() == 1 && is_pcall_expr(&decl.values[0]) {
             // Compile the pcall — pushes 2 values (ok, result).
             self.compile_pcall_expr(&decl.values[0])?;
             // Declare both locals; the stack has [ok, result] (ok pushed first,
@@ -390,9 +398,13 @@ impl Compiler {
                 let var = self.resolve_var(name);
                 self.compile_expr(&assign.value)?;
                 match var {
-                    VarRef::Local(slot)    => { self.emit(Instruction::StoreLocal(slot), line); }
-                    VarRef::Upvalue(idx)   => { self.emit(Instruction::StoreUp(idx), line); }
-                    VarRef::Global         => {
+                    VarRef::Local(slot) => {
+                        self.emit(Instruction::StoreLocal(slot), line);
+                    }
+                    VarRef::Upvalue(idx) => {
+                        self.emit(Instruction::StoreUp(idx), line);
+                    }
+                    VarRef::Global => {
                         return Err(CompileError::UnknownGlobal {
                             name: name.clone(),
                             line: name_span.line,
@@ -581,8 +593,8 @@ impl Compiler {
             return Err(CompileError::GenericForNotIterator { line });
         }
         let iter_expr = &f.iterators[0];
-        let iter_kind = validate_iter_call(iter_expr)
-            .ok_or(CompileError::GenericForNotIterator { line })?;
+        let iter_kind =
+            validate_iter_call(iter_expr).ok_or(CompileError::GenericForNotIterator { line })?;
 
         // Compile the table argument.
         let table_arg = extract_iter_table_arg(iter_expr)
@@ -594,7 +606,7 @@ impl Compiler {
         // Emit ITER_INIT_* with placeholder offset.
         let init_idx = match iter_kind {
             IterKind::Sorted => self.emit(Instruction::IterInitSorted(0), line),
-            IterKind::Array  => self.emit(Instruction::IterInitArray(0), line),
+            IterKind::Array => self.emit(Instruction::IterInitArray(0), line),
         };
 
         // ITER_NEXT is the loop top.
@@ -605,8 +617,16 @@ impl Compiler {
         self.enter_block();
         let n_vars = f.vars.len();
         // Always declare at least 2; pad with hidden names.
-        let (key_name, key_span) = if n_vars >= 1 { f.vars[0].clone() } else { ("_".to_string(), f.span) };
-        let (val_name, val_span) = if n_vars >= 2 { f.vars[1].clone() } else { ("_v".to_string(), f.span) };
+        let (key_name, key_span) = if n_vars >= 1 {
+            f.vars[0].clone()
+        } else {
+            ("_".to_string(), f.span)
+        };
+        let (val_name, val_span) = if n_vars >= 2 {
+            f.vars[1].clone()
+        } else {
+            ("_v".to_string(), f.span)
+        };
 
         let k_slot = self.declare_local(&key_name, key_span.line)?;
         let v_slot = self.declare_local(&val_name, val_span.line)?;
@@ -642,7 +662,11 @@ impl Compiler {
         let name = &decl.name;
 
         // Determine extra params (self for method syntax).
-        let extra: &[&str] = if name.method.is_some() { &["self"] } else { &[] };
+        let extra: &[&str] = if name.method.is_some() {
+            &["self"]
+        } else {
+            &[]
+        };
         let proto_idx = self.compile_function_body(&decl.func, extra)?;
         self.emit(Instruction::Closure(proto_idx), line);
 
@@ -663,9 +687,13 @@ impl Compiler {
             let varname = all_parts[0];
             let var = self.resolve_var(varname);
             match var {
-                VarRef::Local(slot)  => { self.emit(Instruction::StoreLocal(slot), line); }
-                VarRef::Upvalue(idx) => { self.emit(Instruction::StoreUp(idx), line); }
-                VarRef::Global       => {
+                VarRef::Local(slot) => {
+                    self.emit(Instruction::StoreLocal(slot), line);
+                }
+                VarRef::Upvalue(idx) => {
+                    self.emit(Instruction::StoreUp(idx), line);
+                }
+                VarRef::Global => {
                     // Auto-declare as a local in the current function scope.
                     let slot = self.declare_local(varname, line)?;
                     self.emit(Instruction::StoreLocal(slot), line);
@@ -677,8 +705,12 @@ impl Compiler {
             let base = all_parts[0];
             let var = self.resolve_var(base);
             match var {
-                VarRef::Local(slot)  => { self.emit(Instruction::LoadLocal(slot), line); }
-                VarRef::Upvalue(idx) => { self.emit(Instruction::LoadUp(idx), line); }
+                VarRef::Local(slot) => {
+                    self.emit(Instruction::LoadLocal(slot), line);
+                }
+                VarRef::Upvalue(idx) => {
+                    self.emit(Instruction::LoadUp(idx), line);
+                }
                 VarRef::Global => {
                     return Err(CompileError::UnknownGlobal {
                         name: base.to_string(),
@@ -716,8 +748,12 @@ impl Compiler {
 
             // Reload base.
             match var {
-                VarRef::Local(slot)  => { self.emit(Instruction::LoadLocal(slot), line); }
-                VarRef::Upvalue(idx) => { self.emit(Instruction::LoadUp(idx), line); }
+                VarRef::Local(slot) => {
+                    self.emit(Instruction::LoadLocal(slot), line);
+                }
+                VarRef::Upvalue(idx) => {
+                    self.emit(Instruction::LoadUp(idx), line);
+                }
                 VarRef::Global => unreachable!(),
             }
             // Navigate intermediate fields again.
@@ -788,8 +824,10 @@ impl Compiler {
     fn compile_return(&mut self, ret: &ReturnStmt) -> Result<(), CompileError> {
         let line = ret.span.line;
         match &ret.value {
-            None        => { self.emit(Instruction::Ret(0), line); }
-            Some(expr)  => {
+            None => {
+                self.emit(Instruction::Ret(0), line);
+            }
+            Some(expr) => {
                 self.compile_expr(expr)?;
                 self.emit(Instruction::Ret(1), line);
             }
@@ -804,18 +842,24 @@ impl Compiler {
     pub fn compile_expr(&mut self, expr: &Expr) -> Result<(), CompileError> {
         let line = expr.span().line;
         match expr {
-            Expr::Nil(_)           => { self.emit(Instruction::PushNil, line); }
-            Expr::True(_)          => { self.emit(Instruction::PushTrue, line); }
-            Expr::False(_)         => { self.emit(Instruction::PushFalse, line); }
-            Expr::Integer(n, _)    => {
+            Expr::Nil(_) => {
+                self.emit(Instruction::PushNil, line);
+            }
+            Expr::True(_) => {
+                self.emit(Instruction::PushTrue, line);
+            }
+            Expr::False(_) => {
+                self.emit(Instruction::PushFalse, line);
+            }
+            Expr::Integer(n, _) => {
                 let idx = self.add_int_constant(*n, line)?;
                 self.emit(Instruction::PushK(idx), line);
             }
-            Expr::StringLit(b, _)  => {
+            Expr::StringLit(b, _) => {
                 let idx = self.add_string_constant(b, line)?;
                 self.emit(Instruction::PushK(idx), line);
             }
-            Expr::Vararg(_)        => {
+            Expr::Vararg(_) => {
                 return Err(CompileError::VariadicNotAllowed { line });
             }
             Expr::Name(name, span) => {
@@ -844,9 +888,15 @@ impl Compiler {
             Expr::UnOp(u) => {
                 self.compile_expr(&u.operand)?;
                 match u.op {
-                    UnOpKind::Neg => { self.emit(Instruction::Neg, line); }
-                    UnOpKind::Not => { self.emit(Instruction::Not, line); }
-                    UnOpKind::Len => { self.emit(Instruction::Len, line); }
+                    UnOpKind::Neg => {
+                        self.emit(Instruction::Neg, line);
+                    }
+                    UnOpKind::Not => {
+                        self.emit(Instruction::Not, line);
+                    }
+                    UnOpKind::Len => {
+                        self.emit(Instruction::Len, line);
+                    }
                 }
             }
             Expr::Call(call) => {
@@ -878,9 +928,13 @@ impl Compiler {
             _ => {}
         }
         match self.resolve_var(name) {
-            VarRef::Local(slot)  => { self.emit(Instruction::LoadLocal(slot), line); }
-            VarRef::Upvalue(idx) => { self.emit(Instruction::LoadUp(idx), line); }
-            VarRef::Global       => {
+            VarRef::Local(slot) => {
+                self.emit(Instruction::LoadLocal(slot), line);
+            }
+            VarRef::Upvalue(idx) => {
+                self.emit(Instruction::LoadUp(idx), line);
+            }
+            VarRef::Global => {
                 // Known builtin globals: emit sentinel string constant.
                 match name {
                     "string" => {
@@ -901,7 +955,8 @@ impl Compiler {
                     }
                     "tostring" | "tonumber" => {
                         // Treated as regular globals resolved by the VM.
-                        let idx = self.add_string_constant(format!("__{}", name).as_bytes(), line)?;
+                        let idx =
+                            self.add_string_constant(format!("__{}", name).as_bytes(), line)?;
                         self.emit(Instruction::PushK(idx), line);
                     }
                     _ => {
@@ -925,7 +980,9 @@ impl Compiler {
         let mut auto_idx: i64 = 1;
         for field in &tc.fields {
             match field {
-                TableField::NamedKey { name, value, span, .. } => {
+                TableField::NamedKey {
+                    name, value, span, ..
+                } => {
                     let fline = span.line;
                     self.emit(Instruction::Dup, fline);
                     let idx = self.add_string_constant(name.as_bytes(), fline)?;
@@ -977,18 +1034,18 @@ impl Compiler {
                 self.compile_expr(&b.left)?;
                 self.compile_expr(&b.right)?;
                 let instr = match b.op {
-                    BinOpKind::Add  => Instruction::Add,
-                    BinOpKind::Sub  => Instruction::Sub,
-                    BinOpKind::Mul  => Instruction::Mul,
+                    BinOpKind::Add => Instruction::Add,
+                    BinOpKind::Sub => Instruction::Sub,
+                    BinOpKind::Mul => Instruction::Mul,
                     BinOpKind::IDiv => Instruction::IDiv,
-                    BinOpKind::Mod  => Instruction::Mod,
-                    BinOpKind::Eq   => Instruction::Eq,
-                    BinOpKind::Ne   => Instruction::Ne,
-                    BinOpKind::Lt   => Instruction::Lt,
-                    BinOpKind::Le   => Instruction::Le,
-                    BinOpKind::Gt   => Instruction::Gt,
-                    BinOpKind::Ge   => Instruction::Ge,
-                    _               => unreachable!(),
+                    BinOpKind::Mod => Instruction::Mod,
+                    BinOpKind::Eq => Instruction::Eq,
+                    BinOpKind::Ne => Instruction::Ne,
+                    BinOpKind::Lt => Instruction::Lt,
+                    BinOpKind::Le => Instruction::Le,
+                    BinOpKind::Gt => Instruction::Gt,
+                    BinOpKind::Ge => Instruction::Ge,
+                    _ => unreachable!(),
                 };
                 self.emit(instr, line);
             }
@@ -1090,7 +1147,9 @@ impl Compiler {
     fn compile_pcall_expr(&mut self, expr: &Expr) -> Result<(), CompileError> {
         match expr {
             Expr::Call(call) => self.compile_pcall(call),
-            _ => Err(CompileError::MultiReturnNotAllowed { line: expr.span().line }),
+            _ => Err(CompileError::MultiReturnNotAllowed {
+                line: expr.span().line,
+            }),
         }
     }
 
@@ -1143,7 +1202,11 @@ impl Compiler {
         self.compile_block(&body.block)?;
 
         // Ensure function ends with a return.
-        let needs_ret = self.current_scope().proto.code.last()
+        let needs_ret = self
+            .current_scope()
+            .proto
+            .code
+            .last()
             .map(|i| !matches!(i, Instruction::Ret(_)))
             .unwrap_or(true);
         if needs_ret {
@@ -1190,8 +1253,8 @@ fn validate_iter_call(expr: &Expr) -> Option<IterKind> {
             if let Expr::Name(name, _) = call.func.as_ref() {
                 match name.as_str() {
                     "pairs_sorted" | "pairs" => Some(IterKind::Sorted),
-                    "ipairs"                 => Some(IterKind::Array),
-                    _                        => None,
+                    "ipairs" => Some(IterKind::Array),
+                    _ => None,
                 }
             } else {
                 None

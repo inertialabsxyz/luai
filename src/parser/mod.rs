@@ -23,10 +23,22 @@ pub fn parse(source: &str) -> Result<Block, ParseError> {
 // ---------------------------------------------------------------------------
 
 const DISALLOWED_IDENTS: &[&str] = &[
-    "debug", "io", "os", "package", "require",
-    "load", "dofile", "loadfile", "loadstring",
-    "collectgarbage", "setmetatable", "getmetatable",
-    "rawget", "rawset", "setfenv", "getfenv",
+    "debug",
+    "io",
+    "os",
+    "package",
+    "require",
+    "load",
+    "dofile",
+    "loadfile",
+    "loadstring",
+    "collectgarbage",
+    "setmetatable",
+    "getmetatable",
+    "rawget",
+    "rawset",
+    "setfenv",
+    "getfenv",
     "coroutine",
 ];
 
@@ -56,10 +68,6 @@ impl Parser {
 
     fn peek2(&self) -> Option<&SpannedToken> {
         self.tokens.get(self.pos + 1)
-    }
-
-    fn peek3(&self) -> Option<&SpannedToken> {
-        self.tokens.get(self.pos + 2)
     }
 
     fn advance(&mut self) -> &SpannedToken {
@@ -126,11 +134,7 @@ impl Parser {
     fn at_block_end(&self) -> bool {
         matches!(
             self.peek().token,
-            Token::KwEnd
-                | Token::KwElse
-                | Token::KwElseif
-                | Token::KwReturn
-                | Token::Eof
+            Token::KwEnd | Token::KwElse | Token::KwElseif | Token::KwReturn | Token::Eof
         )
     }
 
@@ -237,7 +241,11 @@ impl Parser {
             }
         }
 
-        Ok(Stmt::LocalDecl(LocalDecl { names, values, span }))
+        Ok(Stmt::LocalDecl(LocalDecl {
+            names,
+            values,
+            span,
+        }))
     }
 
     fn parse_if(&mut self) -> Result<Stmt, ParseError> {
@@ -255,7 +263,11 @@ impl Parser {
                 let cond = self.parse_expr()?;
                 self.expect(&Token::KwThen, "`then`")?;
                 let block = self.parse_block()?;
-                elseif_clauses.push(ElseifClause { condition: cond, block, span: clause_span });
+                elseif_clauses.push(ElseifClause {
+                    condition: cond,
+                    block,
+                    span: clause_span,
+                });
             } else if self.check(&Token::KwElse) {
                 self.advance();
                 else_block = Some(self.parse_block()?);
@@ -266,7 +278,13 @@ impl Parser {
         }
 
         self.expect(&Token::KwEnd, "`end`")?;
-        Ok(Stmt::If(IfStmt { condition, then_block, elseif_clauses, else_block, span }))
+        Ok(Stmt::If(IfStmt {
+            condition,
+            then_block,
+            elseif_clauses,
+            else_block,
+            span,
+        }))
     }
 
     fn parse_while(&mut self) -> Result<Stmt, ParseError> {
@@ -275,7 +293,11 @@ impl Parser {
         self.expect(&Token::KwDo, "`do`")?;
         let block = self.parse_block()?;
         self.expect(&Token::KwEnd, "`end`")?;
-        Ok(Stmt::While(WhileStmt { condition, block, span }))
+        Ok(Stmt::While(WhileStmt {
+            condition,
+            block,
+            span,
+        }))
     }
 
     fn parse_for(&mut self) -> Result<Stmt, ParseError> {
@@ -325,7 +347,12 @@ impl Parser {
         self.expect(&Token::KwDo, "`do`")?;
         let block = self.parse_block()?;
         self.expect(&Token::KwEnd, "`end`")?;
-        Ok(Stmt::GenericFor(GenericFor { vars, iterators, block, span }))
+        Ok(Stmt::GenericFor(GenericFor {
+            vars,
+            iterators,
+            block,
+            span,
+        }))
     }
 
     fn parse_function_decl(&mut self) -> Result<Stmt, ParseError> {
@@ -374,15 +401,17 @@ impl Parser {
             let span = self.advance().span; // consume `=`
             let value = self.parse_expr()?;
             let target = expr_to_assign_target(expr, span)?;
-            return Ok(Stmt::Assign(Assign { target, value, span }));
+            return Ok(Stmt::Assign(Assign {
+                target,
+                value,
+                span,
+            }));
         }
 
         // Must be a call expression to be valid as a statement
         let span = expr.span();
         match expr {
-            Expr::Call(_) | Expr::MethodCall(_) => {
-                Ok(Stmt::ExprStmt(ExprStmt { expr, span }))
-            }
+            Expr::Call(_) | Expr::MethodCall(_) => Ok(Stmt::ExprStmt(ExprStmt { expr, span })),
             _ => Err(ParseError::UnexpectedToken {
                 span,
                 expected: "function call or assignment",
@@ -419,7 +448,11 @@ impl Parser {
         self.expect(&Token::RParen, "`)`")?;
         let block = self.parse_block()?;
         self.expect(&Token::KwEnd, "`end`")?;
-        Ok(FuncBody { params, block, span })
+        Ok(FuncBody {
+            params,
+            block,
+            span,
+        })
     }
 
     // -----------------------------------------------------------------------
@@ -457,20 +490,20 @@ impl Parser {
     /// Returns `(op_kind, precedence, right_associative)` for the current token if it's a binary op.
     fn peek_binop(&self) -> Option<(BinOpKind, u8, bool)> {
         match &self.peek().token {
-            Token::KwOr       => Some((BinOpKind::Or,     1, false)),
-            Token::KwAnd      => Some((BinOpKind::And,    2, false)),
-            Token::Lt         => Some((BinOpKind::Lt,     3, false)),
-            Token::LtEq       => Some((BinOpKind::Le,     3, false)),
-            Token::Gt         => Some((BinOpKind::Gt,     3, false)),
-            Token::GtEq       => Some((BinOpKind::Ge,     3, false)),
-            Token::Eq         => Some((BinOpKind::Eq,     3, false)),
-            Token::TildeEq    => Some((BinOpKind::Ne,     3, false)),
-            Token::DotDot     => Some((BinOpKind::Concat, 4, true)),
-            Token::Plus       => Some((BinOpKind::Add,    5, false)),
-            Token::Minus      => Some((BinOpKind::Sub,    5, false)),
-            Token::Star       => Some((BinOpKind::Mul,    6, false)),
-            Token::SlashSlash => Some((BinOpKind::IDiv,   6, false)),
-            Token::Percent    => Some((BinOpKind::Mod,    6, false)),
+            Token::KwOr => Some((BinOpKind::Or, 1, false)),
+            Token::KwAnd => Some((BinOpKind::And, 2, false)),
+            Token::Lt => Some((BinOpKind::Lt, 3, false)),
+            Token::LtEq => Some((BinOpKind::Le, 3, false)),
+            Token::Gt => Some((BinOpKind::Gt, 3, false)),
+            Token::GtEq => Some((BinOpKind::Ge, 3, false)),
+            Token::Eq => Some((BinOpKind::Eq, 3, false)),
+            Token::TildeEq => Some((BinOpKind::Ne, 3, false)),
+            Token::DotDot => Some((BinOpKind::Concat, 4, true)),
+            Token::Plus => Some((BinOpKind::Add, 5, false)),
+            Token::Minus => Some((BinOpKind::Sub, 5, false)),
+            Token::Star => Some((BinOpKind::Mul, 6, false)),
+            Token::SlashSlash => Some((BinOpKind::IDiv, 6, false)),
+            Token::Percent => Some((BinOpKind::Mod, 6, false)),
             _ => None,
         }
     }
@@ -481,17 +514,29 @@ impl Parser {
             Token::KwNot => {
                 self.advance();
                 let operand = self.parse_unop()?;
-                Ok(Expr::UnOp(UnOp { op: UnOpKind::Not, operand: Box::new(operand), span }))
+                Ok(Expr::UnOp(UnOp {
+                    op: UnOpKind::Not,
+                    operand: Box::new(operand),
+                    span,
+                }))
             }
             Token::Minus => {
                 self.advance();
                 let operand = self.parse_unop()?;
-                Ok(Expr::UnOp(UnOp { op: UnOpKind::Neg, operand: Box::new(operand), span }))
+                Ok(Expr::UnOp(UnOp {
+                    op: UnOpKind::Neg,
+                    operand: Box::new(operand),
+                    span,
+                }))
             }
             Token::Hash => {
                 self.advance();
                 let operand = self.parse_unop()?;
-                Ok(Expr::UnOp(UnOp { op: UnOpKind::Len, operand: Box::new(operand), span }))
+                Ok(Expr::UnOp(UnOp {
+                    op: UnOpKind::Len,
+                    operand: Box::new(operand),
+                    span,
+                }))
             }
             _ => self.parse_suffixed_expr(),
         }
@@ -529,7 +574,11 @@ impl Parser {
                 Token::LParen | Token::StringLit(_) | Token::LBrace => {
                     let span = expr.span();
                     let args = self.parse_call_args()?;
-                    expr = Expr::Call(Call { func: Box::new(expr), args, span });
+                    expr = Expr::Call(Call {
+                        func: Box::new(expr),
+                        args,
+                        span,
+                    });
                 }
                 _ => break,
             }
@@ -541,11 +590,26 @@ impl Parser {
     fn parse_primary_atom(&mut self) -> Result<Expr, ParseError> {
         let span = self.current_span();
         match self.peek().token.clone() {
-            Token::KwNil => { self.advance(); Ok(Expr::Nil(span)) }
-            Token::KwTrue => { self.advance(); Ok(Expr::True(span)) }
-            Token::KwFalse => { self.advance(); Ok(Expr::False(span)) }
-            Token::Integer(n) => { self.advance(); Ok(Expr::Integer(n, span)) }
-            Token::StringLit(b) => { self.advance(); Ok(Expr::StringLit(b, span)) }
+            Token::KwNil => {
+                self.advance();
+                Ok(Expr::Nil(span))
+            }
+            Token::KwTrue => {
+                self.advance();
+                Ok(Expr::True(span))
+            }
+            Token::KwFalse => {
+                self.advance();
+                Ok(Expr::False(span))
+            }
+            Token::Integer(n) => {
+                self.advance();
+                Ok(Expr::Integer(n, span))
+            }
+            Token::StringLit(b) => {
+                self.advance();
+                Ok(Expr::StringLit(b, span))
+            }
 
             Token::DotDotDot => {
                 self.advance();
@@ -616,7 +680,11 @@ impl Parser {
                         call_span,
                     );
                     let args = self.parse_call_args()?;
-                    Ok(Expr::Call(Call { func: Box::new(func), args, span: tool_span }))
+                    Ok(Expr::Call(Call {
+                        func: Box::new(func),
+                        args,
+                        span: tool_span,
+                    }))
                 } else {
                     // `tool.call` as a reference (e.g. argument to pcall).
                     // Accepted syntactically; the compiler validates context.
@@ -702,7 +770,12 @@ impl Parser {
                     let name_span = self.advance().span; // consume name
                     self.advance(); // consume `=`
                     let value = self.parse_expr()?;
-                    return Ok(TableField::NamedKey { name, name_span, value, span });
+                    return Ok(TableField::NamedKey {
+                        name,
+                        name_span,
+                        value,
+                        span,
+                    });
                 }
             }
         }
@@ -809,7 +882,9 @@ mod tests {
     fn local_simple() {
         let block = parse_ok("local x = 42");
         assert_eq!(block.stmts.len(), 1);
-        let Stmt::LocalDecl(ld) = &block.stmts[0] else { panic!() };
+        let Stmt::LocalDecl(ld) = &block.stmts[0] else {
+            panic!()
+        };
         assert_eq!(ld.names[0].0, "x");
         assert!(matches!(ld.values[0], Expr::Integer(42, _)));
     }
@@ -817,7 +892,9 @@ mod tests {
     #[test]
     fn local_multi_assign() {
         let block = parse_ok("local a, b = 1, 2");
-        let Stmt::LocalDecl(ld) = &block.stmts[0] else { panic!() };
+        let Stmt::LocalDecl(ld) = &block.stmts[0] else {
+            panic!()
+        };
         assert_eq!(ld.names.len(), 2);
         assert_eq!(ld.values.len(), 2);
     }
@@ -827,21 +904,27 @@ mod tests {
     #[test]
     fn simple_assign() {
         let block = parse_ok("x = 1");
-        let Stmt::Assign(a) = &block.stmts[0] else { panic!() };
+        let Stmt::Assign(a) = &block.stmts[0] else {
+            panic!()
+        };
         assert!(matches!(a.target, AssignTarget::Name(ref n, _) if n == "x"));
     }
 
     #[test]
     fn table_index_assign() {
         let block = parse_ok("t[k] = v");
-        let Stmt::Assign(a) = &block.stmts[0] else { panic!() };
+        let Stmt::Assign(a) = &block.stmts[0] else {
+            panic!()
+        };
         assert!(matches!(a.target, AssignTarget::Index(_, _, _)));
     }
 
     #[test]
     fn table_field_assign() {
         let block = parse_ok("t.k = v");
-        let Stmt::Assign(a) = &block.stmts[0] else { panic!() };
+        let Stmt::Assign(a) = &block.stmts[0] else {
+            panic!()
+        };
         // `.k` is desugared to Index with string key
         assert!(matches!(a.target, AssignTarget::Index(_, _, _)));
     }
@@ -857,14 +940,18 @@ mod tests {
     #[test]
     fn if_else() {
         let block = parse_ok("if x then local a = 1 else local b = 2 end");
-        let Stmt::If(stmt) = &block.stmts[0] else { panic!() };
+        let Stmt::If(stmt) = &block.stmts[0] else {
+            panic!()
+        };
         assert!(stmt.else_block.is_some());
     }
 
     #[test]
     fn if_elseif() {
         let block = parse_ok("if a then elseif b then end");
-        let Stmt::If(stmt) = &block.stmts[0] else { panic!() };
+        let Stmt::If(stmt) = &block.stmts[0] else {
+            panic!()
+        };
         assert_eq!(stmt.elseif_clauses.len(), 1);
     }
 
@@ -881,7 +968,9 @@ mod tests {
     #[test]
     fn numeric_for_basic() {
         let block = parse_ok("for i = 1, 10 do end");
-        let Stmt::NumericFor(f) = &block.stmts[0] else { panic!() };
+        let Stmt::NumericFor(f) = &block.stmts[0] else {
+            panic!()
+        };
         assert_eq!(f.var, "i");
         assert!(f.step.is_none());
     }
@@ -889,7 +978,9 @@ mod tests {
     #[test]
     fn numeric_for_with_step() {
         let block = parse_ok("for i = 1, 10, 2 do end");
-        let Stmt::NumericFor(f) = &block.stmts[0] else { panic!() };
+        let Stmt::NumericFor(f) = &block.stmts[0] else {
+            panic!()
+        };
         assert!(f.step.is_some());
     }
 
@@ -898,7 +989,9 @@ mod tests {
     #[test]
     fn generic_for() {
         let block = parse_ok("for k, v in pairs_sorted(t) do end");
-        let Stmt::GenericFor(f) = &block.stmts[0] else { panic!() };
+        let Stmt::GenericFor(f) = &block.stmts[0] else {
+            panic!()
+        };
         assert_eq!(f.vars.len(), 2);
     }
 
@@ -919,7 +1012,9 @@ mod tests {
     #[test]
     fn method_function_decl() {
         let block = parse_ok("function t:method(x) end");
-        let Stmt::FunctionDecl(f) = &block.stmts[0] else { panic!() };
+        let Stmt::FunctionDecl(f) = &block.stmts[0] else {
+            panic!()
+        };
         assert!(f.name.method.is_some());
     }
 
@@ -928,7 +1023,9 @@ mod tests {
     #[test]
     fn break_stmt() {
         let block = parse_ok("while true do break end");
-        let Stmt::While(w) = &block.stmts[0] else { panic!() };
+        let Stmt::While(w) = &block.stmts[0] else {
+            panic!()
+        };
         assert!(matches!(w.block.stmts[0], Stmt::Break(_)));
     }
 
@@ -938,8 +1035,12 @@ mod tests {
     fn precedence_mul_before_add() {
         // 1 + 2 * 3 → BinOp(Add, 1, BinOp(Mul, 2, 3))
         let block = parse_ok("local x = 1 + 2 * 3");
-        let Stmt::LocalDecl(ld) = &block.stmts[0] else { panic!() };
-        let Expr::BinOp(outer) = &ld.values[0] else { panic!() };
+        let Stmt::LocalDecl(ld) = &block.stmts[0] else {
+            panic!()
+        };
+        let Expr::BinOp(outer) = &ld.values[0] else {
+            panic!()
+        };
         assert_eq!(outer.op, BinOpKind::Add);
         assert!(matches!(*outer.right, Expr::BinOp(ref b) if b.op == BinOpKind::Mul));
     }
@@ -948,8 +1049,12 @@ mod tests {
     fn precedence_and_before_or() {
         // a or b and c → or(a, and(b, c))
         let block = parse_ok("local x = a or b and c");
-        let Stmt::LocalDecl(ld) = &block.stmts[0] else { panic!() };
-        let Expr::BinOp(outer) = &ld.values[0] else { panic!() };
+        let Stmt::LocalDecl(ld) = &block.stmts[0] else {
+            panic!()
+        };
+        let Expr::BinOp(outer) = &ld.values[0] else {
+            panic!()
+        };
         assert_eq!(outer.op, BinOpKind::Or);
         assert!(matches!(*outer.right, Expr::BinOp(ref b) if b.op == BinOpKind::And));
     }
@@ -958,8 +1063,12 @@ mod tests {
     fn concat_right_assoc() {
         // a .. b .. c → a .. (b .. c)
         let block = parse_ok("local x = a .. b .. c");
-        let Stmt::LocalDecl(ld) = &block.stmts[0] else { panic!() };
-        let Expr::BinOp(outer) = &ld.values[0] else { panic!() };
+        let Stmt::LocalDecl(ld) = &block.stmts[0] else {
+            panic!()
+        };
+        let Expr::BinOp(outer) = &ld.values[0] else {
+            panic!()
+        };
         assert_eq!(outer.op, BinOpKind::Concat);
         assert!(matches!(*outer.right, Expr::BinOp(ref b) if b.op == BinOpKind::Concat));
     }
@@ -975,7 +1084,9 @@ mod tests {
     #[test]
     fn method_call() {
         let block = parse_ok("t:method(x)");
-        let Stmt::ExprStmt(es) = &block.stmts[0] else { panic!() };
+        let Stmt::ExprStmt(es) = &block.stmts[0] else {
+            panic!()
+        };
         assert!(matches!(es.expr, Expr::MethodCall(_)));
     }
 
@@ -984,8 +1095,12 @@ mod tests {
     #[test]
     fn table_constructor() {
         let block = parse_ok("local t = { 1, 2, k = 3 }");
-        let Stmt::LocalDecl(ld) = &block.stmts[0] else { panic!() };
-        let Expr::TableConstructor(tc) = &ld.values[0] else { panic!() };
+        let Stmt::LocalDecl(ld) = &block.stmts[0] else {
+            panic!()
+        };
+        let Expr::TableConstructor(tc) = &ld.values[0] else {
+            panic!()
+        };
         assert_eq!(tc.fields.len(), 3);
         assert!(matches!(tc.fields[0], TableField::Positional { .. }));
         assert!(matches!(tc.fields[2], TableField::NamedKey { .. }));
@@ -994,8 +1109,12 @@ mod tests {
     #[test]
     fn table_explicit_key() {
         let block = parse_ok("local t = { [1+1] = 42 }");
-        let Stmt::LocalDecl(ld) = &block.stmts[0] else { panic!() };
-        let Expr::TableConstructor(tc) = &ld.values[0] else { panic!() };
+        let Stmt::LocalDecl(ld) = &block.stmts[0] else {
+            panic!()
+        };
+        let Expr::TableConstructor(tc) = &ld.values[0] else {
+            panic!()
+        };
         assert!(matches!(tc.fields[0], TableField::ExplicitKey { .. }));
     }
 
@@ -1004,8 +1123,12 @@ mod tests {
     #[test]
     fn tool_call_ok() {
         let block = parse_ok(r#"local r = tool.call("x", {})"#);
-        let Stmt::LocalDecl(ld) = &block.stmts[0] else { panic!() };
-        let Expr::Call(c) = &ld.values[0] else { panic!() };
+        let Stmt::LocalDecl(ld) = &block.stmts[0] else {
+            panic!()
+        };
+        let Expr::Call(c) = &ld.values[0] else {
+            panic!()
+        };
         // func should be Field(Name("tool"), "call")
         assert!(matches!(*c.func, Expr::Field(_, ref field, _) if field == "call"));
     }
@@ -1085,7 +1208,9 @@ mod tests {
     #[test]
     fn anon_function_expr() {
         let block = parse_ok("local f = function(x) return x end");
-        let Stmt::LocalDecl(ld) = &block.stmts[0] else { panic!() };
+        let Stmt::LocalDecl(ld) = &block.stmts[0] else {
+            panic!()
+        };
         assert!(matches!(ld.values[0], Expr::FuncDef(_, _)));
     }
 
@@ -1109,7 +1234,9 @@ mod tests {
     #[test]
     fn multi_assign_local() {
         let block = parse_ok("local a, b = pcall(f)");
-        let Stmt::LocalDecl(ld) = &block.stmts[0] else { panic!() };
+        let Stmt::LocalDecl(ld) = &block.stmts[0] else {
+            panic!()
+        };
         assert_eq!(ld.names.len(), 2);
     }
 
@@ -1118,7 +1245,9 @@ mod tests {
     #[test]
     fn unary_chain() {
         let block = parse_ok("local x = not not true");
-        let Stmt::LocalDecl(ld) = &block.stmts[0] else { panic!() };
+        let Stmt::LocalDecl(ld) = &block.stmts[0] else {
+            panic!()
+        };
         assert!(matches!(ld.values[0], Expr::UnOp(ref u) if u.op == UnOpKind::Not));
     }
 

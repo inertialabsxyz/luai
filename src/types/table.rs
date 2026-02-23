@@ -71,10 +71,14 @@ impl LuaTable {
 
     /// Like `rawset` but returns metadata about whether a key was inserted and
     /// whether the hash backing array grew.
-    pub fn rawset_tracked(&mut self, key: LuaKey, value: LuaValue) -> Result<RawsetResult, LuaError> {
+    pub fn rawset_tracked(
+        &mut self,
+        key: LuaKey,
+        value: LuaValue,
+    ) -> Result<RawsetResult, LuaError> {
         if let LuaKey::Integer(i) = key {
             if i == i64::MIN {
-                return Err(LuaError::ERR_RUNTIME);
+                return Err(LuaError::Runtime);
             }
         }
 
@@ -106,7 +110,10 @@ impl LuaTable {
                                 break;
                             }
                         }
-                        RawsetResult::Inserted { grew: false, new_hash_capacity: self.hash_capacity }
+                        RawsetResult::Inserted {
+                            grew: false,
+                            new_hash_capacity: self.hash_capacity,
+                        }
                     }
                 } else {
                     let old_capacity = self.hash_capacity;
@@ -115,7 +122,10 @@ impl LuaTable {
                         self.entry_count += 1;
                         let new_cap = self.update_hash_capacity();
                         let grew = new_cap > old_capacity;
-                        RawsetResult::Inserted { grew, new_hash_capacity: new_cap }
+                        RawsetResult::Inserted {
+                            grew,
+                            new_hash_capacity: new_cap,
+                        }
                     } else {
                         RawsetResult::Updated
                     }
@@ -128,7 +138,10 @@ impl LuaTable {
                     self.entry_count += 1;
                     let new_cap = self.update_hash_capacity();
                     let grew = new_cap > old_capacity;
-                    RawsetResult::Inserted { grew, new_hash_capacity: new_cap }
+                    RawsetResult::Inserted {
+                        grew,
+                        new_hash_capacity: new_cap,
+                    }
                 } else {
                     RawsetResult::Updated
                 }
@@ -136,7 +149,7 @@ impl LuaTable {
         };
 
         if self.entry_count > MAX_TABLE_ENTRIES {
-            return Err(LuaError::ERR_MEM);
+            return Err(LuaError::Memory);
         }
 
         Ok(result)
@@ -390,7 +403,7 @@ mod tests {
         assert!(!t.hash.contains_key(&LuaKey::Integer(4)));
     }
 
-    // Entry count exceeds max_table_entries → ERR_MEM
+    // Entry count exceeds max_table_entries → Memory
     #[test]
     fn entry_count_cap_returns_err_mem() {
         let mut t = make_table();
@@ -400,7 +413,7 @@ mod tests {
         }
         // One more should exceed the cap
         let result = t.rawset(LuaKey::Integer(MAX_TABLE_ENTRIES as i64 + 1), int(0));
-        assert!(matches!(result, Err(LuaError::ERR_MEM)));
+        assert!(matches!(result, Err(LuaError::Memory)));
     }
 
     // charged_bytes() grows at power-of-2 thresholds

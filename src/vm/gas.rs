@@ -31,13 +31,13 @@ pub mod gas_cost {
 pub enum VmError {
     /// ERR_GAS — unrecoverable
     GasExhausted,
-    /// ERR_MEM — unrecoverable
+    /// Memory — unrecoverable
     MemoryExhausted,
     /// ERR_DEPTH — recoverable via pcall
     CallDepthExceeded,
-    /// ERR_TYPE — recoverable via pcall
+    /// Type — recoverable via pcall
     TypeError(String),
-    /// ERR_RUNTIME — recoverable via pcall; also raised by error() builtin
+    /// Runtime — recoverable via pcall; also raised by error() builtin
     RuntimeError(LuaValue),
     /// ERR_TOOL — recoverable via pcall
     ToolError(String),
