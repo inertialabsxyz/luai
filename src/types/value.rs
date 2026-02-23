@@ -10,6 +10,42 @@ pub enum LuaError {
     Type,
 }
 
+/// Identifies a built-in standard library function by a stable tag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BuiltinId {
+    // Core
+    Type,
+    Tostring,
+    Tonumber,
+    Select,
+    Unpack,
+    // string module
+    StringLen,
+    StringSub,
+    StringFind,
+    StringUpper,
+    StringLower,
+    StringRep,
+    StringByte,
+    StringChar,
+    StringFormat,
+    StringUnsupported, // match/gmatch/gsub sentinel
+    // math module
+    MathAbs,
+    MathMin,
+    MathMax,
+    MathScaleDiv,
+    // table module
+    TableInsert,
+    TableRemove,
+    TableConcat,
+    TableSort,
+    TableMove,
+    // json module
+    JsonEncode,
+    JsonDecode,
+}
+
 /// A Lua closure: a function prototype index plus captured upvalues.
 #[derive(Debug, Clone)]
 pub struct LuaClosure {
@@ -50,6 +86,7 @@ pub enum LuaValue {
     String(LuaString),
     Table(Rc<RefCell<LuaTable>>),
     Function(LuaClosure),
+    Builtin(BuiltinId),
 }
 
 impl LuaValue {
@@ -60,7 +97,7 @@ impl LuaValue {
             LuaValue::Integer(_) => "integer",
             LuaValue::String(_) => "string",
             LuaValue::Table(_) => "table",
-            LuaValue::Function(_) => "function",
+            LuaValue::Function(_) | LuaValue::Builtin(_) => "function",
         }
     }
 }
@@ -69,6 +106,7 @@ impl LuaValue {
     pub fn is_truthy(&self) -> bool {
         !matches!(self, LuaValue::Nil | LuaValue::Boolean(false))
     }
+
 }
 
 impl PartialEq for LuaValue {
@@ -87,6 +125,7 @@ impl PartialEq for LuaValue {
                         .zip(b.upvalues.iter())
                         .all(|(x, y)| Rc::ptr_eq(x, y))
             }
+            (LuaValue::Builtin(a), LuaValue::Builtin(b)) => a == b,
             _ => false,
         }
     }
@@ -162,7 +201,7 @@ impl LuaValue {
             LuaValue::Integer(n) => LuaString::from_str(&n.to_string()),
             LuaValue::String(s) => s.clone(),
             LuaValue::Table(_) => LuaString::from_str("table"),
-            LuaValue::Function(_) => LuaString::from_str("function"),
+            LuaValue::Function(_) | LuaValue::Builtin(_) => LuaString::from_str("function"),
         }
     }
 }
@@ -183,8 +222,9 @@ impl LuaValue {
             LuaValue::String(s) => Ok(LuaKey::String(s)),
             LuaValue::Boolean(b) => Ok(LuaKey::Boolean(b)),
             LuaValue::Nil => Err(LuaError::Runtime),
-            LuaValue::Table(_) => Err(LuaError::Type),
-            LuaValue::Function(_) => Err(LuaError::Type),
+            LuaValue::Table(_) | LuaValue::Function(_) | LuaValue::Builtin(_) => {
+                Err(LuaError::Type)
+            }
         }
     }
 }
@@ -207,7 +247,7 @@ impl std::fmt::Display for LuaValue {
             LuaValue::Integer(n) => write!(f, "{}", n),
             LuaValue::String(s) => write!(f, "{}", String::from_utf8_lossy(s.as_bytes())),
             LuaValue::Table(_) => write!(f, "table"),
-            LuaValue::Function(_) => write!(f, "function"),
+            LuaValue::Function(_) | LuaValue::Builtin(_) => write!(f, "function"),
         }
     }
 }
@@ -322,6 +362,7 @@ mod tests {
             .type_name(),
             "function"
         );
+        assert_eq!(LuaValue::Builtin(BuiltinId::Type).type_name(), "function");
     }
 
     // --- is_truthy ---
@@ -548,6 +589,7 @@ mod tests {
             .to_lua_string(),
             ls("function")
         );
+        assert_eq!(LuaValue::Builtin(BuiltinId::Type).to_lua_string(), ls("function"));
     }
 
     // --- to_number_coerce ---

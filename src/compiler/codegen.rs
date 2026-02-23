@@ -953,8 +953,8 @@ impl Compiler {
                         let idx = self.add_string_constant(b"__json", line)?;
                         self.emit(Instruction::PushK(idx), line);
                     }
-                    "tostring" | "tonumber" => {
-                        // Treated as regular globals resolved by the VM.
+                    "tostring" | "tonumber" | "type" | "select" | "unpack" => {
+                        // Treated as regular globals resolved by the VM via sentinel key.
                         let idx =
                             self.add_string_constant(format!("__{}", name).as_bytes(), line)?;
                         self.emit(Instruction::PushK(idx), line);
@@ -1095,13 +1095,16 @@ impl Compiler {
                     self.emit(Instruction::Error, line);
                     return Ok(());
                 }
-                "print" => {
+                "print" | "log" => {
                     if let Some(arg) = call.args.first() {
                         self.compile_expr(arg)?;
                     } else {
                         self.emit(Instruction::PushNil, line);
                     }
                     self.emit(Instruction::Log, line);
+                    // Log pops its argument; push nil so that the statement-level
+                    // Pop (emitted by compile_expr_stmt) has something to consume.
+                    self.emit(Instruction::PushNil, line);
                     return Ok(());
                 }
                 _ => {}

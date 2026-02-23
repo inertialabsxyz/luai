@@ -4,9 +4,10 @@ use crate::{
     compiler::proto::{CompiledProgram, Constant, Instruction, UpvalueDesc},
     types::{
         table::{LuaKey, LuaTable, RawsetResult},
-        value::{LuaClosure, LuaError, LuaString, LuaValue},
+        value::{BuiltinId, LuaClosure, LuaError, LuaString, LuaValue},
     },
     vm::{
+        builtins::{self, build_globals, ceil_log2},
         gas::{GasMeter, VmError, gas_cost},
         memory::{MemoryMeter, alloc_size},
     },
@@ -146,6 +147,7 @@ pub struct Vm<H: HostInterface> {
     total_tool_bytes_in: usize,
     total_tool_bytes_out: usize,
     host: H,
+    globals: LuaTable,
 }
 
 impl<H: HostInterface> Vm<H> {
@@ -163,6 +165,7 @@ impl<H: HostInterface> Vm<H> {
             total_tool_bytes_in: 0,
             total_tool_bytes_out: 0,
             host,
+            globals: build_globals(),
         }
     }
 
@@ -339,7 +342,8 @@ impl<H: HostInterface> Vm<H> {
             Instruction::GetTable => {
                 self.gas.charge(gas_cost::TABLE_GET)?;
                 let key = self.pop_value()?.into_key().map_err(VmError::from)?;
-                let table_val = self.pop_value()?;
+                let raw_table_val = self.pop_value()?;
+                let table_val = self.resolve_sentinel(raw_table_val);
                 let t = table_val.as_table().map_err(VmError::from)?;
                 let result = t.borrow().get(&key).cloned().unwrap_or(LuaValue::Nil);
                 self.stack.push(StackSlot::Value(result));
@@ -358,7 +362,9 @@ impl<H: HostInterface> Vm<H> {
                 let frame = self.frames.last().unwrap();
                 let proto = &program.prototypes[frame.proto_idx];
                 let key = constant_to_string_key(&proto.constants[idx as usize])?;
-                let table_val = self.pop_value()?;
+                let raw_table_val = self.pop_value()?;
+                // Resolve sentinel strings to their module table from globals.
+                let table_val = self.resolve_sentinel(raw_table_val);
                 let t = table_val.as_table().map_err(VmError::from)?;
                 let result = t.borrow().get(&key).cloned().unwrap_or(LuaValue::Nil);
                 self.stack.push(StackSlot::Value(result));
@@ -560,10 +566,40 @@ impl<H: HostInterface> Vm<H> {
                     args.push(self.pop_value()?);
                 }
                 args.reverse();
-                let func_val = self.pop_value()?;
-                let closure = func_val.as_function().map_err(VmError::from)?.clone();
+                let raw_func = self.pop_value()?;
 
-                self.push_call_frame(program, closure, args, 1)?;
+                // Resolve sentinel string globals (e.g. __tostring → Builtin).
+                let func_val = self.resolve_sentinel(raw_func);
+
+                match func_val {
+                    LuaValue::Builtin(BuiltinId::TableSort) => {
+                        // Special case: table.sort needs re-entrant dispatch.
+                        self.do_table_sort(program, &args)?;
+                        // table.sort returns nil; push so the statement-level Pop works.
+                        self.stack.push(StackSlot::Value(LuaValue::Nil));
+                    }
+                    LuaValue::Builtin(id) => {
+                        let results = builtins::call_builtin(
+                            id,
+                            &args,
+                            &mut self.gas,
+                            &mut self.mem,
+                            &mut self.logs,
+                        )?;
+                        // Always push exactly one value (nil if empty, first if multiple).
+                        let ret = results.into_iter().next().unwrap_or(LuaValue::Nil);
+                        self.stack.push(StackSlot::Value(ret));
+                    }
+                    LuaValue::Function(closure) => {
+                        self.push_call_frame(program, closure, args, 1)?;
+                    }
+                    other => {
+                        return Err(VmError::TypeError(format!(
+                            "attempt to call a {} value",
+                            other.type_name()
+                        )));
+                    }
+                }
             }
 
             Instruction::Ret(n) => {
@@ -637,13 +673,65 @@ impl<H: HostInterface> Vm<H> {
                     args.push(self.pop_value()?);
                 }
                 args.reverse();
-                let func_val = self.pop_value()?;
+                let raw_pcall_func = self.pop_value()?;
+                let func_val = self.resolve_sentinel(raw_pcall_func);
 
                 // Save checkpoint.
                 let checkpoint = PCallCheckpoint {
                     stack_len: self.stack.len(),
                     frame_len: self.frames.len(),
                 };
+
+                // Handle builtin callees directly (no frame push needed).
+                match &func_val {
+                    LuaValue::Builtin(BuiltinId::TableSort) => {
+                        let result = self.do_table_sort(program, &args);
+                        match result {
+                            Ok(()) => {
+                                self.stack.push(StackSlot::Value(LuaValue::Boolean(true)));
+                                self.stack.push(StackSlot::Value(LuaValue::Nil));
+                            }
+                            Err(e) if e.is_unrecoverable() => return Err(e),
+                            Err(e) => {
+                                self.gas.charge(gas_cost::PCALL_UNWIND)?;
+                                self.stack.truncate(checkpoint.stack_len);
+                                self.frames.truncate(checkpoint.frame_len);
+                                let err_val = error_to_lua_value(e);
+                                self.stack.push(StackSlot::Value(LuaValue::Boolean(false)));
+                                self.stack.push(StackSlot::Value(err_val));
+                            }
+                        }
+                        return Ok(None);
+                    }
+                    LuaValue::Builtin(id) => {
+                        let id = *id;
+                        let result = builtins::call_builtin(
+                            id,
+                            &args,
+                            &mut self.gas,
+                            &mut self.mem,
+                            &mut self.logs,
+                        );
+                        match result {
+                            Ok(vals) => {
+                                self.stack.push(StackSlot::Value(LuaValue::Boolean(true)));
+                                let ret = vals.into_iter().next().unwrap_or(LuaValue::Nil);
+                                self.stack.push(StackSlot::Value(ret));
+                            }
+                            Err(e) if e.is_unrecoverable() => return Err(e),
+                            Err(e) => {
+                                self.gas.charge(gas_cost::PCALL_UNWIND)?;
+                                self.stack.truncate(checkpoint.stack_len);
+                                self.frames.truncate(checkpoint.frame_len);
+                                let err_val = error_to_lua_value(e);
+                                self.stack.push(StackSlot::Value(LuaValue::Boolean(false)));
+                                self.stack.push(StackSlot::Value(err_val));
+                            }
+                        }
+                        return Ok(None);
+                    }
+                    _ => {}
+                }
 
                 let closure = match func_val.as_function() {
                     Ok(c) => c.clone(),
@@ -1024,6 +1112,185 @@ impl<H: HostInterface> Vm<H> {
         let frame = self.frames.last_mut().unwrap();
         frame.pc = (frame.pc as isize + offset as isize) as usize;
     }
+
+    /// If `v` is a sentinel string like `__tostring`, look it up in the globals
+    /// table and return the resolved value. Otherwise return `v` unchanged.
+    fn resolve_sentinel(&self, v: LuaValue) -> LuaValue {
+        if let LuaValue::String(ref s) = v {
+            if s.as_bytes().starts_with(b"__") {
+                let key = LuaKey::String(s.clone());
+                if let Some(resolved) = self.globals.get(&key) {
+                    return resolved.clone();
+                }
+            }
+        }
+        v
+    }
+
+    /// Perform `table.sort` with optional Lua comparator (re-entrant dispatch).
+    /// `args[0]` = table, `args[1]` = optional comparator.
+    fn do_table_sort(
+        &mut self,
+        program: &CompiledProgram,
+        args: &[LuaValue],
+    ) -> Result<(), VmError> {
+        let t = match args.first() {
+            Some(LuaValue::Table(t)) => Rc::clone(t),
+            Some(other) => {
+                return Err(VmError::TypeError(format!(
+                    "table.sort: expected table, got {}",
+                    other.type_name()
+                )));
+            }
+            None => return Err(VmError::RuntimeError(LuaValue::String(
+                LuaString::from_str("table.sort: missing table argument"),
+            ))),
+        };
+
+        let comp = args.get(1).cloned();
+
+        let n = t.borrow().length() as usize;
+        if n <= 1 {
+            return Ok(());
+        }
+
+        // Charge gas: n * ceil_log2(n + 1)
+        let sort_gas = n as u64 * ceil_log2(n + 1);
+        self.gas.charge(sort_gas)?;
+
+        // Extract array.
+        let mut arr: Vec<LuaValue> = (1..=n as i64)
+            .map(|k| {
+                t.borrow()
+                    .get(&LuaKey::Integer(k))
+                    .cloned()
+                    .unwrap_or(LuaValue::Nil)
+            })
+            .collect();
+
+        // Sort using the appropriate comparator.
+        let result = match comp {
+            None | Some(LuaValue::Nil) => {
+                // Default: standard Lua ordering (integers / strings).
+                self.merge_sort_default(&mut arr)
+            }
+            Some(comp_val) => {
+                // Custom comparator: call back into the VM.
+                self.merge_sort_with_comp(program, &mut arr, comp_val)
+            }
+        };
+        result?;
+
+        // Write back.
+        for (i, v) in arr.into_iter().enumerate() {
+            t.borrow_mut()
+                .rawset(LuaKey::Integer((i + 1) as i64), v)
+                .map_err(VmError::from)?;
+        }
+
+        Ok(())
+    }
+
+    fn merge_sort_default(&self, arr: &mut Vec<LuaValue>) -> Result<(), VmError> {
+        let n = arr.len();
+        if n <= 1 {
+            return Ok(());
+        }
+        let mid = n / 2;
+        let mut left = arr[..mid].to_vec();
+        let mut right = arr[mid..].to_vec();
+        self.merge_sort_default(&mut left)?;
+        self.merge_sort_default(&mut right)?;
+        let mut i = 0;
+        let mut j = 0;
+        let mut k = 0;
+        while i < left.len() && j < right.len() {
+            let less = match left[i].lua_cmp(&right[j]) {
+                Ok(ord) => ord.is_lt(),
+                Err(_) => {
+                    return Err(VmError::TypeError(
+                        "table.sort: cannot compare mixed types".into(),
+                    ));
+                }
+            };
+            if less {
+                arr[k] = left[i].clone();
+                i += 1;
+            } else {
+                arr[k] = right[j].clone();
+                j += 1;
+            }
+            k += 1;
+        }
+        while i < left.len() {
+            arr[k] = left[i].clone();
+            i += 1;
+            k += 1;
+        }
+        while j < right.len() {
+            arr[k] = right[j].clone();
+            j += 1;
+            k += 1;
+        }
+        Ok(())
+    }
+
+    fn merge_sort_with_comp(
+        &mut self,
+        program: &CompiledProgram,
+        arr: &mut Vec<LuaValue>,
+        comp: LuaValue,
+    ) -> Result<(), VmError> {
+        let n = arr.len();
+        if n <= 1 {
+            return Ok(());
+        }
+        let mid = n / 2;
+        let mut left = arr[..mid].to_vec();
+        let mut right = arr[mid..].to_vec();
+        self.merge_sort_with_comp(program, &mut left, comp.clone())?;
+        self.merge_sort_with_comp(program, &mut right, comp.clone())?;
+        let mut i = 0;
+        let mut j = 0;
+        let mut k = 0;
+        while i < left.len() && j < right.len() {
+            let less = self.call_comparator(program, &comp, &left[i], &right[j])?;
+            if less {
+                arr[k] = left[i].clone();
+                i += 1;
+            } else {
+                arr[k] = right[j].clone();
+                j += 1;
+            }
+            k += 1;
+        }
+        while i < left.len() {
+            arr[k] = left[i].clone();
+            i += 1;
+            k += 1;
+        }
+        while j < right.len() {
+            arr[k] = right[j].clone();
+            j += 1;
+            k += 1;
+        }
+        Ok(())
+    }
+
+    /// Call a Lua comparator function `comp(a, b)` and return whether `a < b`.
+    fn call_comparator(
+        &mut self,
+        program: &CompiledProgram,
+        comp: &LuaValue,
+        a: &LuaValue,
+        b: &LuaValue,
+    ) -> Result<bool, VmError> {
+        let closure = comp.as_function().map_err(VmError::from)?.clone();
+        let args = vec![a.clone(), b.clone()];
+        self.push_call_frame(program, closure, args, 1)?;
+        let result = self.run_inner(program)?;
+        Ok(result.is_truthy())
+    }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -1095,16 +1362,8 @@ fn canonical_size_value(v: &LuaValue) -> usize {
         LuaValue::Integer(_) => 8,
         LuaValue::String(s) => s.len() + 1,
         LuaValue::Table(_) => 8,
-        LuaValue::Function(_) => 8,
+        LuaValue::Function(_) | LuaValue::Builtin(_) => 8,
     }
-}
-
-/// ceil(log2(n)), returning 0 for n <= 1.
-fn ceil_log2(n: usize) -> u64 {
-    if n <= 1 {
-        return 0;
-    }
-    (usize::BITS - (n - 1).leading_zeros()) as u64
 }
 
 // ── LuaError → VmError conversion ─────────────────────────────────────────────
