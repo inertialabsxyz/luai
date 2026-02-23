@@ -1,8 +1,12 @@
 use luai::{
     bytecode, compiler, parser,
-    types::value::LuaValue,
+    host::transcript::ToolCallStatus,
+    types::{
+        table::{LuaKey, LuaTable},
+        value::{LuaString, LuaValue},
+    },
     vm::{
-        engine::{NoopHost, Vm, VmConfig},
+        engine::{HostInterface, Vm, VmConfig},
         gas::VmError,
     },
 };
@@ -10,6 +14,59 @@ use std::{
     env, fs,
     io::{self, Read},
 };
+
+// ── DemoHost ──────────────────────────────────────────────────────────────────
+// A simple host used by example scripts that need real tool responses.
+// Supports a small fixed set of tools; all others return an error.
+
+struct DemoHost;
+
+impl HostInterface for DemoHost {
+    fn call_tool(&mut self, name: &str, args: &LuaTable) -> Result<LuaTable, String> {
+        let mut resp = LuaTable::new();
+        let str_key = |s: &str| LuaKey::String(LuaString::from_str(s));
+        match name {
+            // echo: returns {message = args.message}
+            "echo" => {
+                let msg = args
+                    .get(&str_key("message"))
+                    .cloned()
+                    .unwrap_or(LuaValue::Nil);
+                resp.rawset(str_key("message"), msg).unwrap();
+            }
+            // add: returns {result = args.a + args.b}
+            "add" => {
+                let a = match args.get(&str_key("a")) {
+                    Some(LuaValue::Integer(n)) => *n,
+                    _ => return Err("add: expected integer arg 'a'".into()),
+                };
+                let b = match args.get(&str_key("b")) {
+                    Some(LuaValue::Integer(n)) => *n,
+                    _ => return Err("add: expected integer arg 'b'".into()),
+                };
+                resp.rawset(str_key("result"), LuaValue::Integer(a + b)).unwrap();
+            }
+            // upper: returns {result = string.upper(args.text)}
+            "upper" => {
+                let text = match args.get(&str_key("text")) {
+                    Some(LuaValue::String(s)) => {
+                        String::from_utf8_lossy(s.as_bytes()).to_uppercase()
+                    }
+                    _ => return Err("upper: expected string arg 'text'".into()),
+                };
+                resp.rawset(
+                    str_key("result"),
+                    LuaValue::String(LuaString::from_str(&text)),
+                )
+                .unwrap();
+            }
+            // fail: always errors
+            "fail" => return Err("this tool always fails".into()),
+            other => return Err(format!("unknown tool '{other}'")),
+        }
+        Ok(resp)
+    }
+}
 
 fn source_line(source: &str, line: u32) -> &str {
     source
@@ -35,7 +92,7 @@ fn run(source: &str) -> Result<(), VmError> {
         )))
     })?;
 
-    let mut vm = Vm::new(VmConfig::default(), NoopHost);
+    let mut vm = Vm::new(VmConfig::default(), DemoHost);
     let output = vm.execute(&program, LuaValue::Nil)?;
 
     for msg in &output.logs {
@@ -43,6 +100,24 @@ fn run(source: &str) -> Result<(), VmError> {
     }
     if !matches!(output.return_value, LuaValue::Nil) {
         println!("=> {}", output.return_value);
+    }
+    if !output.transcript.is_empty() {
+        eprintln!("[transcript: {} tool call(s)]", output.transcript.len());
+        for r in &output.transcript {
+            let args = String::from_utf8_lossy(&r.args_canonical);
+            let status = match r.status {
+                ToolCallStatus::Ok => format!(
+                    "ok  resp={} bytes sha256={}",
+                    r.response_bytes,
+                    &r.response_hash[..12],
+                ),
+                ToolCallStatus::Error => "err".to_owned(),
+            };
+            eprintln!(
+                "  [{}] {} args={} gas={} {}",
+                r.seq, r.tool_name, args, r.gas_charged, status
+            );
+        }
     }
     eprintln!(
         "[gas: {}, mem: {} bytes]",
