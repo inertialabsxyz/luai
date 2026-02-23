@@ -6,7 +6,7 @@ log(type("hi"))      -- string
 log(type(true))      -- boolean
 log(type(nil))       -- nil
 log(type({}))        -- table
-log(tostring(123as)) -- "123"
+log(tostring(123))   -- "123"
 log(tostring(false)) -- "false"
 
 -- ── string library ───────────────────────────────────────────────────────────

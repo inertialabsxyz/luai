@@ -984,117 +984,12 @@ fn json_encode(
     mem: &mut MemoryMeter,
 ) -> Result<Vec<LuaValue>, VmError> {
     let v = require_arg(args, 0, "json.encode")?;
-    let result = json_encode_value(v, 0)?;
+    let result = crate::host::canonicalize::canonical_serialize(v)
+        .map_err(VmError::from)?;
     check_string_len(result.len())?;
     gas.charge(result.len() as u64)?;
     mem.track_alloc(alloc_size::string(result.len()))?;
     Ok(vec![LuaValue::String(LuaString::from_bytes(&result))])
-}
-
-fn json_encode_value(v: &LuaValue, depth: usize) -> Result<Vec<u8>, VmError> {
-    if depth > MAX_TABLE_DEPTH {
-        return Err(runtime_err("json.encode: table depth exceeded"));
-    }
-
-    match v {
-        LuaValue::Nil => Ok(b"null".to_vec()),
-        LuaValue::Boolean(b) => Ok(if *b { b"true".to_vec() } else { b"false".to_vec() }),
-        LuaValue::Integer(n) => Ok(n.to_string().into_bytes()),
-        LuaValue::String(s) => json_encode_string(s.as_bytes()),
-        LuaValue::Table(t) => json_encode_table(&t.borrow(), depth),
-        LuaValue::Function(_) | LuaValue::Builtin(_) => {
-            Err(runtime_err("json.encode: functions not serializable"))
-        }
-    }
-}
-
-fn json_encode_string(bytes: &[u8]) -> Result<Vec<u8>, VmError> {
-    let mut out = vec![b'"'];
-    for &b in bytes {
-        match b {
-            b'"' => out.extend_from_slice(b"\\\""),
-            b'\\' => out.extend_from_slice(b"\\\\"),
-            b'\n' => out.extend_from_slice(b"\\n"),
-            b'\r' => out.extend_from_slice(b"\\r"),
-            b'\t' => out.extend_from_slice(b"\\t"),
-            0x00..=0x1f => {
-                let s = format!("\\u{:04x}", b);
-                out.extend_from_slice(s.as_bytes());
-            }
-            _ => out.push(b),
-        }
-    }
-    out.push(b'"');
-    Ok(out)
-}
-
-fn json_encode_table(t: &LuaTable, depth: usize) -> Result<Vec<u8>, VmError> {
-    let len = t.length();
-
-    // Check if it's a pure array: all keys are 1..len integers.
-    let entry_count = {
-        let mut count = 0usize;
-        let mut cursor = None;
-        loop {
-            match t.next_sorted(cursor.as_ref()) {
-                None => break,
-                Some((k, _)) => {
-                    count += 1;
-                    cursor = Some(k);
-                }
-            }
-        }
-        count
-    };
-
-    let is_array = len > 0 && entry_count == len as usize;
-
-    if is_array {
-        let mut out = vec![b'['];
-        for i in 1..=len {
-            if i > 1 {
-                out.push(b',');
-            }
-            let val = t.get(&LuaKey::Integer(i)).cloned().unwrap_or(LuaValue::Nil);
-            let encoded = json_encode_value(&val, depth + 1)?;
-            out.extend_from_slice(&encoded);
-        }
-        out.push(b']');
-        return Ok(out);
-    }
-
-    // Object: sort keys canonically.
-    let mut out = vec![b'{'];
-    let mut cursor = None;
-    let mut first = true;
-    loop {
-        match t.next_sorted(cursor.as_ref()) {
-            None => break,
-            Some((k, v)) => {
-                if !first {
-                    out.push(b',');
-                }
-                first = false;
-
-                // Encode key as string.
-                let key_str: Vec<u8> = match &k {
-                    LuaKey::Integer(n) => json_encode_string(n.to_string().as_bytes())?,
-                    LuaKey::String(s) => json_encode_string(s.as_bytes())?,
-                    LuaKey::Boolean(b) => {
-                        if *b { b"\"true\"".to_vec() } else { b"\"false\"".to_vec() }
-                    }
-                };
-                out.extend_from_slice(&key_str);
-                out.push(b':');
-                let encoded = json_encode_value(v, depth + 1)?;
-                out.extend_from_slice(&encoded);
-
-                cursor = Some(k);
-            }
-        }
-    }
-    out.push(b'}');
-    Ok(out)
 }
 
 fn json_decode(

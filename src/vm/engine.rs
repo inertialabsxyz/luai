@@ -2,6 +2,10 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     compiler::proto::{CompiledProgram, Constant, Instruction, UpvalueDesc},
+    host::{
+        tool_registry::ToolRegistry,
+        transcript::{ToolCallRecord, Transcript},
+    },
     types::{
         table::{LuaKey, LuaTable, RawsetResult},
         value::{BuiltinId, LuaClosure, LuaError, LuaString, LuaValue},
@@ -118,6 +122,7 @@ pub struct VmOutput {
     pub logs: Vec<String>,
     pub gas_used: u64,
     pub memory_used: u64,
+    pub transcript: Vec<ToolCallRecord>,
 }
 
 // ── HostInterface trait ───────────────────────────────────────────────────────
@@ -143,10 +148,8 @@ pub struct Vm<H: HostInterface> {
     stack: Vec<StackSlot>,
     frames: Vec<CallFrame>,
     logs: Vec<String>,
-    tool_calls_made: usize,
-    total_tool_bytes_in: usize,
-    total_tool_bytes_out: usize,
-    host: H,
+    transcript: Transcript,
+    registry: ToolRegistry<H>,
     globals: LuaTable,
 }
 
@@ -161,10 +164,8 @@ impl<H: HostInterface> Vm<H> {
             stack: Vec::new(),
             frames: Vec::new(),
             logs: Vec::new(),
-            tool_calls_made: 0,
-            total_tool_bytes_in: 0,
-            total_tool_bytes_out: 0,
-            host,
+            transcript: Transcript::new(),
+            registry: ToolRegistry::new(host),
             globals: build_globals(),
         }
     }
@@ -178,9 +179,8 @@ impl<H: HostInterface> Vm<H> {
         self.stack.clear();
         self.frames.clear();
         self.logs.clear();
-        self.tool_calls_made = 0;
-        self.total_tool_bytes_in = 0;
-        self.total_tool_bytes_out = 0;
+        self.transcript = Transcript::new();
+        self.registry.reset();
 
         // Push the top-level chunk (prototype 0).
         let proto0 = &program.prototypes[0];
@@ -256,6 +256,7 @@ impl<H: HostInterface> Vm<H> {
             logs: self.logs.clone(),
             gas_used: self.gas.used(),
             memory_used: self.mem.used(),
+            transcript: self.transcript.records().to_vec(),
         })
     }
 
@@ -793,41 +794,16 @@ impl<H: HostInterface> Vm<H> {
                     Err(_) => return Err(VmError::TypeError("tool args must be a table".into())),
                 };
 
-                if self.tool_calls_made >= self.config.max_tool_calls {
-                    return Err(VmError::RuntimeError(LuaValue::String(
-                        LuaString::from_str("tool call limit exceeded"),
-                    )));
-                }
+                let resp_table = self.registry.call(
+                    &name,
+                    &args_table.borrow(),
+                    &self.config,
+                    &mut self.gas,
+                    &mut self.transcript,
+                )?;
 
-                let args_bytes = canonical_size_table(&args_table.borrow());
-                if self.total_tool_bytes_in + args_bytes > self.config.max_tool_bytes_in {
-                    return Err(VmError::RuntimeError(LuaValue::String(
-                        LuaString::from_str("tool input bytes limit exceeded"),
-                    )));
-                }
-
-                self.tool_calls_made += 1;
-                self.total_tool_bytes_in += args_bytes;
-
-                let result = self.host.call_tool(&name, &args_table.borrow());
-
-                match result {
-                    Ok(resp_table) => {
-                        let resp_bytes = canonical_size_table(&resp_table);
-                        if self.total_tool_bytes_out + resp_bytes > self.config.max_tool_bytes_out {
-                            return Err(VmError::RuntimeError(LuaValue::String(
-                                LuaString::from_str("tool output bytes limit exceeded"),
-                            )));
-                        }
-                        self.total_tool_bytes_out += resp_bytes;
-                        self.gas.charge(
-                            gas_cost::TOOL_CALL_BASE + args_bytes as u64 + resp_bytes as u64,
-                        )?;
-                        let t = Rc::new(RefCell::new(resp_table));
-                        self.stack.push(StackSlot::Value(LuaValue::Table(t)));
-                    }
-                    Err(msg) => return Err(VmError::ToolError(msg)),
-                }
+                let t = Rc::new(RefCell::new(resp_table));
+                self.stack.push(StackSlot::Value(LuaValue::Table(t)));
             }
 
             Instruction::Log => {
@@ -1329,42 +1305,6 @@ fn error_to_lua_value(e: VmError) -> LuaValue {
         VmError::MemoryExhausted => LuaValue::String(LuaString::from_str("memory exhausted")),
         VmError::OutputExceeded => LuaValue::String(LuaString::from_str("output exceeded")),
         VmError::WithLine(_, inner) => error_to_lua_value(*inner),
-    }
-}
-
-/// Approximate canonical size of a table (for tool call byte accounting).
-fn canonical_size_table(t: &LuaTable) -> usize {
-    let mut size = 0usize;
-    let mut cursor = None;
-    loop {
-        match t.next_sorted(cursor.as_ref()) {
-            None => break,
-            Some((k, v)) => {
-                size += canonical_size_key(&k);
-                size += canonical_size_value(v);
-                cursor = Some(k);
-            }
-        }
-    }
-    size
-}
-
-fn canonical_size_key(k: &LuaKey) -> usize {
-    match k {
-        LuaKey::Integer(_) => 8,
-        LuaKey::String(s) => s.len() + 1,
-        LuaKey::Boolean(_) => 1,
-    }
-}
-
-fn canonical_size_value(v: &LuaValue) -> usize {
-    match v {
-        LuaValue::Nil => 1,
-        LuaValue::Boolean(_) => 1,
-        LuaValue::Integer(_) => 8,
-        LuaValue::String(s) => s.len() + 1,
-        LuaValue::Table(_) => 8,
-        LuaValue::Function(_) | LuaValue::Builtin(_) => 8,
     }
 }
 

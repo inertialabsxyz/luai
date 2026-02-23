@@ -1,3 +1,4 @@
+pub mod host;
 pub mod types;
 pub mod vm;
 pub mod parser;
@@ -7,6 +8,7 @@ pub mod bytecode;
 pub use vm::engine::{Vm, VmConfig, VmOutput, HostInterface, NoopHost};
 pub use vm::gas::{GasMeter, VmError};
 pub use vm::memory::MemoryMeter;
+pub use host::transcript::{ToolCallRecord, ToolCallStatus, Transcript};
 
 pub fn execute(
     program: &compiler::proto::CompiledProgram,
