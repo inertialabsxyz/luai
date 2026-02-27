@@ -25,7 +25,10 @@ struct FunctionScope {
     /// High-water mark for local slot usage.
     max_locals: u8,
     /// Break patch points per loop nesting level.
-    break_patches: Vec<Vec<usize>>,
+    /// Each entry is (extra_pops, patch_indices): extra_pops is the number of
+    /// Pop instructions to emit before the break jump (1 for generic-for loops
+    /// to clean up the iterator handle, 0 for while/numeric-for).
+    break_patches: Vec<(usize, Vec<usize>)>,
 }
 
 impl FunctionScope {
@@ -167,14 +170,15 @@ impl Compiler {
         }
     }
 
-    fn push_break_scope(&mut self) {
-        self.current_scope_mut().break_patches.push(Vec::new());
+    fn push_break_scope(&mut self, extra_pops: usize) {
+        self.current_scope_mut().break_patches.push((extra_pops, Vec::new()));
     }
 
     fn pop_break_scope(&mut self) -> Vec<usize> {
         self.current_scope_mut()
             .break_patches
             .pop()
+            .map(|(_, patches)| patches)
             .unwrap_or_default()
     }
 
@@ -468,7 +472,7 @@ impl Compiler {
     fn compile_while(&mut self, stmt: &WhileStmt) -> Result<(), CompileError> {
         let line = stmt.span.line;
         let loop_start = self.current_scope().proto.code.len();
-        self.push_break_scope();
+        self.push_break_scope(0);
 
         self.compile_expr(&stmt.condition)?;
         let jmp_exit = self.emit(Instruction::JmpIfNot(0), line);
@@ -517,7 +521,7 @@ impl Compiler {
         let var_slot = self.declare_local(&f.var, f.var_span.line)?;
 
         let loop_start = self.current_scope().proto.code.len();
-        self.push_break_scope();
+        self.push_break_scope(0);
 
         // Loop condition: step >= 0 → i <= lim;  step < 0 → i >= lim
         // We emit a runtime check since step might not be a compile-time constant.
@@ -601,7 +605,8 @@ impl Compiler {
             .ok_or(CompileError::GenericForNotIterator { line })?;
         self.compile_expr(table_arg)?;
 
-        self.push_break_scope();
+        // extra_pops=1: the iterator handle must be popped before a break jump.
+        self.push_break_scope(1);
 
         // Emit ITER_INIT_* with placeholder offset.
         let init_idx = match iter_kind {
@@ -631,9 +636,9 @@ impl Compiler {
         let k_slot = self.declare_local(&key_name, key_span.line)?;
         let v_slot = self.declare_local(&val_name, val_span.line)?;
 
-        // IterNext pushes value then key (key on top).
-        self.emit(Instruction::StoreLocal(k_slot), line);
-        self.emit(Instruction::StoreLocal(v_slot), line);
+        // IterNext pushes key then value (value on top).
+        self.emit(Instruction::StoreLocal(v_slot), line);  // pop value (top) → v
+        self.emit(Instruction::StoreLocal(k_slot), line);  // pop key → k
 
         self.compile_block(&f.block)?;
 
@@ -809,15 +814,20 @@ impl Compiler {
     }
 
     fn compile_break(&mut self, line: u32) -> Result<(), CompileError> {
-        {
+        let extra_pops = {
             let scope = self.current_scope();
             if scope.break_patches.is_empty() {
                 return Err(CompileError::BreakOutsideLoop { line });
             }
+            scope.break_patches.last().unwrap().0
+        };
+        // Clean up any loop-specific stack slots (e.g. iterator handle in generic-for).
+        for _ in 0..extra_pops {
+            self.emit(Instruction::Pop, line);
         }
         let idx = self.emit_placeholder(line);
         let scope = self.current_scope_mut();
-        scope.break_patches.last_mut().unwrap().push(idx);
+        scope.break_patches.last_mut().unwrap().1.push(idx);
         Ok(())
     }
 
