@@ -13,6 +13,7 @@ use luai::{
         engine::{HostInterface, Vm, VmConfig},
         gas::VmError,
     },
+    OracleTape, TapeHost,
 };
 
 // ── Mock host ─────────────────────────────────────────────────────────────────
@@ -344,4 +345,162 @@ fn gas_charged_for_tool_call() {
     // Gas charged must include the base tool call cost.
     let r = &output.transcript[0];
     assert!(r.gas_charged >= 100, "expected gas_charged >= 100, got {}", r.gas_charged);
+}
+
+// ── Tape replay helper ─────────────────────────────────────────────────────────
+
+fn run_with_tape(src: &str, tape: OracleTape, config: VmConfig) -> Result<luai::VmOutput, VmError> {
+    let block = parse(src).expect("parse failed");
+    let program = compile(&block).expect("compile failed");
+    verify(&program).expect("verify failed");
+    let mut vm = Vm::new(config, TapeHost::new(tape));
+    vm.execute(&program, LuaValue::Nil).map_err(|e| match e {
+        VmError::WithLine(_, inner) => *inner,
+        other => other,
+    })
+}
+
+// ── Tape round-trip tests ──────────────────────────────────────────────────────
+
+#[test]
+fn tape_replay_matches_dry_run_return_value() {
+    let src = r#"
+        local resp = tool.call("search", {query = "hello"})
+        return resp.result
+    "#;
+
+    // Dry run with mock host.
+    let mut host = MockHost::new();
+    host.add_ok("search", make_simple_response());
+    let dry_out = run_with_host(src, host, VmConfig::default()).unwrap();
+    assert_eq!(dry_out.return_value, LuaValue::Integer(42));
+
+    // Replay with tape.
+    let tape = OracleTape::from_records(&dry_out.transcript);
+    let replay_out = run_with_tape(src, tape, VmConfig::default()).unwrap();
+
+    assert_eq!(replay_out.return_value, dry_out.return_value);
+}
+
+#[test]
+fn tape_replay_matches_dry_run_gas_and_memory() {
+    let src = r#"
+        local r1 = tool.call("t1", {a = 1})
+        local r2 = tool.call("t2", {b = 2})
+        return r1.result + r2.result
+    "#;
+
+    let mut host = MockHost::new();
+    host.add_ok("t1", make_simple_response());
+    host.add_ok("t2", make_response("result", LuaValue::Integer(8)));
+    let dry_out = run_with_host(src, host, VmConfig::default()).unwrap();
+    assert_eq!(dry_out.return_value, LuaValue::Integer(50));
+
+    let tape = OracleTape::from_records(&dry_out.transcript);
+    let replay_out = run_with_tape(src, tape, VmConfig::default()).unwrap();
+
+    assert_eq!(replay_out.return_value, dry_out.return_value);
+    assert_eq!(replay_out.gas_used, dry_out.gas_used);
+    assert_eq!(replay_out.memory_used, dry_out.memory_used);
+}
+
+#[test]
+fn tape_replay_with_error_entry_propagates_error() {
+    let src = r#"
+        local ok, err = pcall(function()
+            tool.call("broken", {})
+        end)
+        if ok then return 1 else return 0 end
+    "#;
+
+    // Dry run: host returns error, pcall catches it.
+    let mut host = MockHost::new();
+    host.add_err("broken", "tool failed");
+    let dry_out = run_with_host(src, host, VmConfig::default()).unwrap();
+    assert_eq!(dry_out.return_value, LuaValue::Integer(0));
+
+    // Replay: TapeHost replays the error; pcall still catches it.
+    let tape = OracleTape::from_records(&dry_out.transcript);
+    let replay_out = run_with_tape(src, tape, VmConfig::default()).unwrap();
+    assert_eq!(replay_out.return_value, dry_out.return_value);
+}
+
+#[test]
+fn tape_exhausted_returns_error() {
+    let src = r#"
+        tool.call("t", {})
+        return 1
+    "#;
+
+    // Build an empty tape (no entries).
+    let tape = OracleTape::new();
+    let err = run_with_tape(src, tape, VmConfig::default()).unwrap_err();
+    // TapeHost exhaustion surfaces as a ToolError.
+    assert!(matches!(err, VmError::ToolError(_)));
+    if let VmError::ToolError(msg) = err {
+        assert!(msg.contains("exhausted"), "expected 'exhausted' in: {msg}");
+    }
+}
+
+#[test]
+fn tape_commitment_hash_matches_between_runs() {
+    let src = r#"
+        local r = tool.call("tool", {x = 1})
+        return r.result
+    "#;
+
+    let mut host1 = MockHost::new();
+    host1.add_ok("tool", make_simple_response());
+    let out1 = run_with_host(src, host1, VmConfig::default()).unwrap();
+
+    let mut host2 = MockHost::new();
+    host2.add_ok("tool", make_simple_response());
+    let out2 = run_with_host(src, host2, VmConfig::default()).unwrap();
+
+    let tape1 = OracleTape::from_records(&out1.transcript);
+    let tape2 = OracleTape::from_records(&out2.transcript);
+
+    // Two identical dry runs produce the same commitment hash.
+    assert_eq!(tape1.commitment_hash(), tape2.commitment_hash());
+}
+
+#[test]
+fn tape_commitment_hash_differs_for_different_responses() {
+    let src = r#"
+        local r = tool.call("tool", {})
+        return r.result
+    "#;
+
+    let mut host_a = MockHost::new();
+    host_a.add_ok("tool", make_response("result", LuaValue::Integer(1)));
+    let out_a = run_with_host(src, host_a, VmConfig::default()).unwrap();
+
+    let mut host_b = MockHost::new();
+    host_b.add_ok("tool", make_response("result", LuaValue::Integer(2)));
+    let out_b = run_with_host(src, host_b, VmConfig::default()).unwrap();
+
+    let tape_a = OracleTape::from_records(&out_a.transcript);
+    let tape_b = OracleTape::from_records(&out_b.transcript);
+
+    assert_ne!(tape_a.commitment_hash(), tape_b.commitment_hash());
+}
+
+#[test]
+fn tape_replay_transcript_length_matches() {
+    // Replay itself also records a transcript (via TapeHost).
+    let src = r#"
+        tool.call("a", {})
+        tool.call("b", {})
+        return 1
+    "#;
+
+    let mut host = MockHost::new();
+    host.add_ok("a", make_simple_response());
+    host.add_ok("b", make_simple_response());
+    let dry_out = run_with_host(src, host, VmConfig::default()).unwrap();
+    assert_eq!(dry_out.transcript.len(), 2);
+
+    let tape = OracleTape::from_records(&dry_out.transcript);
+    let replay_out = run_with_tape(src, tape, VmConfig::default()).unwrap();
+    assert_eq!(replay_out.transcript.len(), 2);
 }

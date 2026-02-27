@@ -24,6 +24,12 @@ pub struct ToolCallRecord {
     pub response_hash: String,
     /// Byte length of the canonical response bytes (0 on error).
     pub response_bytes: usize,
+    /// Canonical JSON bytes of the response table (empty on error).
+    /// Used to construct an `OracleTape` for zkVM replay.
+    pub response_canonical: Vec<u8>,
+    /// Error message returned by the host (empty string on success).
+    /// Used to replay `Err(msg)` responses from an `OracleTape`.
+    pub error_message: String,
     /// Gas charged for this tool call (0 for failed calls).
     pub gas_charged: u64,
     /// Status of the call.
@@ -61,6 +67,8 @@ impl Transcript {
             args_bytes,
             response_hash,
             response_bytes,
+            response_canonical,
+            error_message: String::new(),
             gas_charged,
             status: ToolCallStatus::Ok,
         });
@@ -72,6 +80,7 @@ impl Transcript {
         tool_name: &str,
         args_canonical: Vec<u8>,
         gas_charged: u64,
+        error_message: &str,
     ) {
         let seq = self.records.len();
         let args_bytes = args_canonical.len();
@@ -83,6 +92,8 @@ impl Transcript {
             args_bytes,
             response_hash: String::new(),
             response_bytes: 0,
+            response_canonical: Vec::new(),
+            error_message: error_message.to_owned(),
             gas_charged,
             status: ToolCallStatus::Error,
         });
@@ -159,7 +170,7 @@ mod tests {
         let mut t = Transcript::new();
         t.record_ok("a", vec![], vec![], 0);
         t.record_ok("b", vec![], vec![], 0);
-        t.record_error("c", vec![], 0);
+        t.record_error("c", vec![], 0, "err c");
         assert_eq!(t.records()[0].seq, 0);
         assert_eq!(t.records()[1].seq, 1);
         assert_eq!(t.records()[2].seq, 2);
@@ -169,7 +180,7 @@ mod tests {
     #[test]
     fn record_error_status() {
         let mut t = Transcript::new();
-        t.record_error("fail_tool", b"{}".to_vec(), 0);
+        t.record_error("fail_tool", b"{}".to_vec(), 0, "something failed");
         let r = &t.records()[0];
         assert_eq!(r.status, ToolCallStatus::Error);
         assert_eq!(r.tool_name, "fail_tool");
@@ -182,7 +193,7 @@ mod tests {
     fn record_error_after_ok() {
         let mut t = Transcript::new();
         t.record_ok("first", vec![], b"resp".to_vec(), 100);
-        t.record_error("second", vec![], 0);
+        t.record_error("second", vec![], 0, "second failed");
         assert_eq!(t.len(), 2);
         assert_eq!(t.records()[0].status, ToolCallStatus::Ok);
         assert_eq!(t.records()[1].status, ToolCallStatus::Error);

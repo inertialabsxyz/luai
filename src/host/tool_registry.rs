@@ -116,7 +116,7 @@ impl<H: HostInterface> ToolRegistry<H> {
             }
             Err(msg) => {
                 // 7. Record error transcript with gas_charged = 0.
-                transcript.record_error(name, args_canonical, 0);
+                transcript.record_error(name, args_canonical, 0, &msg);
                 Err(VmError::ToolError(msg))
             }
         }

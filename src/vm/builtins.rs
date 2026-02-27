@@ -1244,6 +1244,18 @@ fn json_parse(
     Ok((v, parser.pos))
 }
 
+/// Parse canonical JSON bytes into a `LuaValue` without VM metering.
+///
+/// Used by `TapeHost` to decode pre-recorded tool responses from an
+/// `OracleTape`. The resulting value is subject to normal VM resource
+/// accounting once the host returns it to the engine.
+pub(crate) fn decode_json_bytes(bytes: &[u8]) -> Result<LuaValue, String> {
+    let mut mem = MemoryMeter::new(u64::MAX);
+    json_parse(bytes, 0, &mut mem)
+        .map(|(v, _)| v)
+        .map_err(|e| format!("{e:?}"))
+}
+
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
 fn charge_rawset_result(
