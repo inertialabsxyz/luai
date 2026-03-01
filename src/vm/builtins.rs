@@ -1000,7 +1000,12 @@ fn json_decode(
     let s = require_string(args, 0, "json.decode")?;
     let input = s.as_bytes();
     gas.charge(input.len() as u64)?;
-    let (val, _) = json_parse(input, 0, mem)?;
+    let (val, end) = json_parse(input, 0, mem)?;
+    if end != input.len() {
+        return Err(runtime_err(&format!(
+            "json.decode: trailing characters at position {end}"
+        )));
+    }
     Ok(vec![val])
 }
 
@@ -1177,9 +1182,11 @@ impl<'a> JsonParser<'a> {
 
         loop {
             let v = self.parse_value()?;
-            t.borrow_mut()
-                .rawset(LuaKey::Integer(idx), v)
+            let old_cap = t.borrow().capacity();
+            let rs = t.borrow_mut()
+                .rawset_tracked(LuaKey::Integer(idx), v)
                 .map_err(|e| VmError::from(e))?;
+            charge_rawset_result(rs, old_cap, &t, self.mem)?;
             idx += 1;
             self.skip_ws();
             match self.peek() {
@@ -1217,9 +1224,11 @@ impl<'a> JsonParser<'a> {
             self.skip_ws();
             self.expect(b':')?;
             let v = self.parse_value()?;
-            t.borrow_mut()
-                .rawset(key, v)
+            let old_cap = t.borrow().capacity();
+            let rs = t.borrow_mut()
+                .rawset_tracked(key, v)
                 .map_err(|e| VmError::from(e))?;
+            charge_rawset_result(rs, old_cap, &t, self.mem)?;
             self.skip_ws();
             match self.peek() {
                 Some(b',') => { self.pos += 1; }
@@ -2086,6 +2095,237 @@ mod tests {
         let decoded = dispatch(BuiltinId::JsonDecode, encoded).unwrap();
         assert_eq!(decoded.len(), 1);
         assert!(matches!(decoded[0], LuaValue::Table(_)));
+    }
+
+    // ── json.decode trailing input ────────────────────────────────────────────
+
+    #[test]
+    fn json_decode_trailing_non_whitespace_errors() {
+        let err = dispatch(BuiltinId::JsonDecode, vec![s("42abc")]).unwrap_err();
+        assert!(matches!(err, VmError::RuntimeError(_)));
+    }
+
+    #[test]
+    fn json_decode_trailing_whitespace_ok() {
+        let result = dispatch(BuiltinId::JsonDecode, vec![s("42   ")]).unwrap();
+        assert_eq!(result, vec![int(42)]);
+    }
+
+    #[test]
+    fn json_decode_trailing_newline_ok() {
+        let result = dispatch(BuiltinId::JsonDecode, vec![s("null\n")]).unwrap();
+        assert_eq!(result, vec![LuaValue::Nil]);
+    }
+
+    // ── json.decode depth limits ──────────────────────────────────────────────
+
+    #[test]
+    fn json_decode_depth_32_ok() {
+        // 32 nested arrays should succeed.
+        let json = format!("{}1{}", "[".repeat(32), "]".repeat(32));
+        let result = dispatch(BuiltinId::JsonDecode, vec![s(&json)]).unwrap();
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn json_decode_depth_33_error() {
+        // 33 nested arrays should hit the depth limit.
+        let json = format!("{}1{}", "[".repeat(33), "]".repeat(33));
+        let err = dispatch(BuiltinId::JsonDecode, vec![s(&json)]).unwrap_err();
+        assert!(matches!(err, VmError::RuntimeError(_)), "expected RuntimeError for depth-33, got {err:?}");
+    }
+
+    // ── json.decode memory accounting ────────────────────────────────────────
+
+    #[test]
+    fn json_decode_memory_charged_for_table_growth() {
+        // N=17 guarantees at least one hash-capacity growth.
+        let items: Vec<String> = (1..=17).map(|i| i.to_string()).collect();
+        let json = format!("[{}]", items.join(","));
+        let input = s(&json);
+
+        // With a very tight memory budget, decoding should fail.
+        let mut tiny_mem = MemoryMeter::new(50);
+        let mut g = gas();
+        let result = call_builtin(BuiltinId::JsonDecode, &[input.clone()], &mut g, &mut tiny_mem, &mut logs());
+        assert!(matches!(result, Err(VmError::MemoryExhausted)), "expected MemoryExhausted with tiny budget");
+
+        // With the default budget it must succeed.
+        let result = dispatch(BuiltinId::JsonDecode, vec![input]);
+        assert!(result.is_ok(), "expected success with default memory budget");
+    }
+
+    // ── json.encode edge cases ────────────────────────────────────────────────
+
+    #[test]
+    fn json_encode_negative_integer() {
+        assert_eq!(dispatch(BuiltinId::JsonEncode, vec![int(-42)]).unwrap(), vec![s("-42")]);
+    }
+
+    #[test]
+    fn json_encode_i64_min_max() {
+        let min_str = i64::MIN.to_string();
+        let max_str = i64::MAX.to_string();
+        assert_eq!(
+            dispatch(BuiltinId::JsonEncode, vec![int(i64::MIN)]).unwrap(),
+            vec![s(&min_str)]
+        );
+        assert_eq!(
+            dispatch(BuiltinId::JsonEncode, vec![int(i64::MAX)]).unwrap(),
+            vec![s(&max_str)]
+        );
+    }
+
+    #[test]
+    fn json_encode_empty_table_is_object() {
+        let t = make_table();
+        assert_eq!(dispatch(BuiltinId::JsonEncode, vec![tval(t)]).unwrap(), vec![s("{}")]);
+    }
+
+    #[test]
+    fn json_encode_non_consecutive_keys() {
+        // {1:10, 3:30} — gap means it encodes as object, not array.
+        let t = make_table();
+        t.borrow_mut().rawset(LuaKey::Integer(1), int(10)).unwrap();
+        t.borrow_mut().rawset(LuaKey::Integer(3), int(30)).unwrap();
+        let result = dispatch(BuiltinId::JsonEncode, vec![tval(t)]).unwrap();
+        assert_eq!(result.len(), 1);
+        // Must be a JSON object (starts with '{') since keys are not consecutive.
+        if let LuaValue::String(encoded) = &result[0] {
+            let s = std::str::from_utf8(encoded.as_bytes()).unwrap();
+            assert!(s.starts_with('{'), "expected object encoding, got: {s}");
+        } else {
+            panic!("expected string result");
+        }
+    }
+
+    #[test]
+    fn json_encode_nested_array() {
+        let inner1 = make_table();
+        inner1.borrow_mut().rawset(LuaKey::Integer(1), int(1)).unwrap();
+        inner1.borrow_mut().rawset(LuaKey::Integer(2), int(2)).unwrap();
+        let inner2 = make_table();
+        inner2.borrow_mut().rawset(LuaKey::Integer(1), int(3)).unwrap();
+        inner2.borrow_mut().rawset(LuaKey::Integer(2), int(4)).unwrap();
+        let outer = make_table();
+        outer.borrow_mut().rawset(LuaKey::Integer(1), tval(inner1)).unwrap();
+        outer.borrow_mut().rawset(LuaKey::Integer(2), tval(inner2)).unwrap();
+        assert_eq!(
+            dispatch(BuiltinId::JsonEncode, vec![tval(outer)]).unwrap(),
+            vec![s("[[1,2],[3,4]]")]
+        );
+    }
+
+    #[test]
+    fn json_encode_unicode_escape() {
+        // Byte 0x01 (control character) must be encoded as \u0001.
+        let result = dispatch(BuiltinId::JsonEncode, vec![
+            LuaValue::String(LuaString::from_bytes(&[0x01]))
+        ]).unwrap();
+        assert_eq!(result.len(), 1);
+        if let LuaValue::String(encoded) = &result[0] {
+            let s = std::str::from_utf8(encoded.as_bytes()).unwrap();
+            assert!(s.contains("\\u0001"), "expected \\u0001 escape, got: {s}");
+        } else {
+            panic!("expected string");
+        }
+    }
+
+    #[test]
+    fn json_encode_closure_error() {
+        use crate::types::value::LuaClosure;
+        let closure = LuaValue::Function(LuaClosure { proto_idx: 0, upvalues: vec![] });
+        let err = dispatch(BuiltinId::JsonEncode, vec![closure]).unwrap_err();
+        assert!(matches!(err, VmError::RuntimeError(_)));
+    }
+
+    // ── json.decode edge cases ────────────────────────────────────────────────
+
+    #[test]
+    fn json_decode_unicode_escape() {
+        // \u0041 is 'A'.
+        let result = dispatch(BuiltinId::JsonDecode, vec![s(r#""\u0041""#)]).unwrap();
+        assert_eq!(result, vec![s("A")]);
+    }
+
+    #[test]
+    fn json_decode_empty_array() {
+        let result = dispatch(BuiltinId::JsonDecode, vec![s("[]")]).unwrap();
+        assert_eq!(result.len(), 1);
+        if let LuaValue::Table(t) = &result[0] {
+            assert_eq!(t.borrow().length(), 0);
+        } else {
+            panic!("expected table");
+        }
+    }
+
+    #[test]
+    fn json_decode_empty_object() {
+        let result = dispatch(BuiltinId::JsonDecode, vec![s("{}")]).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], LuaValue::Table(_)));
+    }
+
+    #[test]
+    fn json_decode_nested_object() {
+        let result = dispatch(BuiltinId::JsonDecode, vec![s(r#"{"a":{"b":1}}"#)]).unwrap();
+        if let LuaValue::Table(outer) = &result[0] {
+            let inner_key = LuaKey::String(LuaString::from_str("a"));
+            let inner_val = outer.borrow().get(&inner_key).cloned().unwrap();
+            if let LuaValue::Table(inner) = inner_val {
+                let b_key = LuaKey::String(LuaString::from_str("b"));
+                assert_eq!(inner.borrow().get(&b_key), Some(&int(1)));
+            } else {
+                panic!("expected inner table");
+            }
+        } else {
+            panic!("expected outer table");
+        }
+    }
+
+    #[test]
+    fn json_decode_integer_zero() {
+        assert_eq!(dispatch(BuiltinId::JsonDecode, vec![s("0")]).unwrap(), vec![int(0)]);
+    }
+
+    #[test]
+    fn json_decode_integer_negative() {
+        assert_eq!(dispatch(BuiltinId::JsonDecode, vec![s("-99")]).unwrap(), vec![int(-99)]);
+    }
+
+    #[test]
+    fn json_decode_i64_max() {
+        let max_str = i64::MAX.to_string();
+        assert_eq!(
+            dispatch(BuiltinId::JsonDecode, vec![s(&max_str)]).unwrap(),
+            vec![int(i64::MAX)]
+        );
+    }
+
+    #[test]
+    fn json_decode_i64_overflow_errors() {
+        // i64::MAX + 1 overflows.
+        let overflow = format!("{}", i64::MAX as u64 + 1);
+        let err = dispatch(BuiltinId::JsonDecode, vec![s(&overflow)]).unwrap_err();
+        assert!(matches!(err, VmError::RuntimeError(_)));
+    }
+
+    #[test]
+    fn json_decode_exponent_errors() {
+        let err = dispatch(BuiltinId::JsonDecode, vec![s("1e5")]).unwrap_err();
+        assert!(matches!(err, VmError::RuntimeError(_)));
+    }
+
+    #[test]
+    fn json_decode_empty_string_errors() {
+        let err = dispatch(BuiltinId::JsonDecode, vec![s("")]).unwrap_err();
+        assert!(matches!(err, VmError::RuntimeError(_)));
+    }
+
+    #[test]
+    fn json_decode_invalid_escape_errors() {
+        let err = dispatch(BuiltinId::JsonDecode, vec![s("\"\\q\"")]).unwrap_err();
+        assert!(matches!(err, VmError::RuntimeError(_)));
     }
 
     // ── ceil_log2 ─────────────────────────────────────────────────────────────
