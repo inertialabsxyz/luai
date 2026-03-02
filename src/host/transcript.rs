@@ -1,9 +1,12 @@
 //! Tool call transcript — typed records of every tool call made during execution.
 
 use sha2::{Digest, Sha256};
+#[cfg(not(feature = "std"))]
+use alloc::{borrow::ToOwned, format, string::{String, ToString}, vec::Vec};
 
 /// Status of a tool call.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ToolCallStatus {
     Ok,
     Error,
@@ -11,6 +14,7 @@ pub enum ToolCallStatus {
 
 /// A single recorded tool call.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ToolCallRecord {
     /// 0-indexed sequence number.
     pub seq: usize,

@@ -1,4 +1,7 @@
+#[cfg(feature = "std")]
 use std::{cell::RefCell, rc::Rc};
+#[cfg(not(feature = "std"))]
+use {alloc::{boxed::Box, format, rc::Rc, string::{String, ToString}, vec, vec::Vec}, core::cell::RefCell};
 
 use crate::{
     compiler::proto::{CompiledProgram, Constant, Instruction, UpvalueDesc},
@@ -20,6 +23,7 @@ use crate::{
 // ── Configuration ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct VmConfig {
     pub gas_limit: u64,
     pub memory_limit_bytes: u64,
@@ -117,6 +121,7 @@ pub struct PCallCheckpoint {
 // ── Output ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct VmOutput {
     pub return_value: LuaValue,
     pub logs: Vec<String>,

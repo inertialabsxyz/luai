@@ -1,5 +1,8 @@
 use crate::types::value::{LuaError, LuaString, LuaValue, MAX_TABLE_ENTRIES};
+#[cfg(feature = "std")]
 use std::collections::BTreeMap;
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 
 //
 // | Key Type  | Order                        |
@@ -9,6 +12,7 @@ use std::collections::BTreeMap;
 // | Boolean   | `false` < `true`             |
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum LuaKey {
     Integer(i64),
     String(LuaString), // interned or Arc<[u8]>
@@ -30,6 +34,7 @@ pub enum RawsetResult {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LuaTable {
     /// Integer keys 1..array_len stored at index key-1.
     array: Vec<LuaValue>,

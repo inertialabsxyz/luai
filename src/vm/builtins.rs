@@ -3,7 +3,10 @@
 //! All builtins are dispatched through [`call_builtin`]. Gas and memory are
 //! metered via the passed-in [`GasMeter`] and [`MemoryMeter`].
 
+#[cfg(feature = "std")]
 use std::{cell::RefCell, rc::Rc};
+#[cfg(not(feature = "std"))]
+use {alloc::{format, rc::Rc, string::{String, ToString}, vec, vec::Vec}, core::cell::RefCell};
 
 use crate::{
     types::{
@@ -1117,7 +1120,7 @@ impl<'a> JsonParser<'a> {
                                 return Err(runtime_err("json.decode: invalid \\u escape"));
                             }
                             let hex = &self.input[self.pos..self.pos + 4];
-                            let s = std::str::from_utf8(hex)
+                            let s = core::str::from_utf8(hex)
                                 .map_err(|_| runtime_err("json.decode: invalid \\u escape"))?;
                             let code = u32::from_str_radix(s, 16)
                                 .map_err(|_| runtime_err("json.decode: invalid \\u escape"))?;
@@ -1157,7 +1160,7 @@ impl<'a> JsonParser<'a> {
                 "json.decode: fractional numbers not supported; only integers",
             ));
         }
-        let s = std::str::from_utf8(&self.input[start..self.pos])
+        let s = core::str::from_utf8(&self.input[start..self.pos])
             .map_err(|_| runtime_err("json.decode: invalid number"))?;
         let n = s
             .parse::<i64>()
@@ -2192,7 +2195,7 @@ mod tests {
         assert_eq!(result.len(), 1);
         // Must be a JSON object (starts with '{') since keys are not consecutive.
         if let LuaValue::String(encoded) = &result[0] {
-            let s = std::str::from_utf8(encoded.as_bytes()).unwrap();
+            let s = core::str::from_utf8(encoded.as_bytes()).unwrap();
             assert!(s.starts_with('{'), "expected object encoding, got: {s}");
         } else {
             panic!("expected string result");
@@ -2224,7 +2227,7 @@ mod tests {
         ]).unwrap();
         assert_eq!(result.len(), 1);
         if let LuaValue::String(encoded) = &result[0] {
-            let s = std::str::from_utf8(encoded.as_bytes()).unwrap();
+            let s = core::str::from_utf8(encoded.as_bytes()).unwrap();
             assert!(s.contains("\\u0001"), "expected \\u0001 escape, got: {s}");
         } else {
             panic!("expected string");

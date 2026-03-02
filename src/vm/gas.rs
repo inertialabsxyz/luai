@@ -1,4 +1,6 @@
 use crate::types::value::LuaValue;
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, string::String};
 
 /// Gas costs for each VM operation category.
 pub mod gas_cost {

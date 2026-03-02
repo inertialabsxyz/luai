@@ -1,5 +1,8 @@
 use crate::compiler::proto::{CompiledProgram, FunctionProto, Instruction, Constant};
+#[cfg(feature = "std")]
 use std::collections::VecDeque;
+#[cfg(not(feature = "std"))]
+use alloc::{collections::VecDeque, vec, vec::Vec};
 
 pub const MAX_STACK_DEPTH: usize = 256;
 

@@ -1,8 +1,12 @@
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 /// Instruction set for the Lua VM bytecode.
 ///
 /// Jump offsets (`i16`) are relative to the instruction *after* the jump,
 /// i.e. target = pc + 1 + offset.  Negative offsets are back-edges.
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Instruction {
     Nop,
     PushK(u16),          // push constant[idx]
@@ -54,6 +58,7 @@ pub enum Instruction {
 
 /// Constant pool entry.
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Constant {
     Nil,
     Boolean(bool),
@@ -64,6 +69,7 @@ pub enum Constant {
 
 /// A compiled function prototype (one per function/closure/top-level chunk).
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FunctionProto {
     /// Flat instruction list.
     pub code: Vec<Instruction>,
@@ -100,6 +106,7 @@ impl FunctionProto {
 
 /// Describes how a closure captures a variable.
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum UpvalueDesc {
     /// Capture from the enclosing function's local slot.
     Local(u8),
@@ -109,6 +116,7 @@ pub enum UpvalueDesc {
 
 /// The output of the compiler: all function prototypes + a program hash.
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CompiledProgram {
     /// Index 0 is always the top-level chunk (implicit function with 0 params).
     pub prototypes: Vec<FunctionProto>,

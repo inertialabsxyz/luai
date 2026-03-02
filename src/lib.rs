@@ -1,9 +1,16 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+
 pub mod host;
 pub mod types;
 pub mod vm;
 pub mod parser;
 pub mod compiler;
 pub mod bytecode;
+
+#[cfg(feature = "zkvm")]
+pub mod zkvm;
 
 pub use vm::engine::{Vm, VmConfig, VmOutput, HostInterface, NoopHost};
 pub use vm::gas::{GasMeter, VmError};

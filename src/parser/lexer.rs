@@ -1,3 +1,6 @@
+#[cfg(not(feature = "std"))]
+use alloc::{format, string::{String, ToString}, vec::Vec};
+
 /// Byte offset span + line number for a token or AST node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Span {
@@ -524,7 +527,7 @@ impl<'src> Lexer<'src> {
                 self.pos += 1;
                 return Err(ParseError::FloatLiteral { span: self.span_from(start, line) });
             }
-            let hex_str = std::str::from_utf8(&self.src[hex_start..self.pos]).unwrap();
+            let hex_str = core::str::from_utf8(&self.src[hex_start..self.pos]).unwrap();
             if hex_str.is_empty() {
                 return Err(ParseError::UnexpectedToken {
                     span: self.span_from(start, line),
@@ -560,7 +563,7 @@ impl<'src> Lexer<'src> {
             return Err(ParseError::FloatLiteral { span: self.span_from(start, line) });
         }
 
-        let text = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
+        let text = core::str::from_utf8(&self.src[start..self.pos]).unwrap();
         let val: i64 = text.parse().map_err(|_| ParseError::IntegerOverflow {
             span: self.span_from(start, line),
         })?;
@@ -728,7 +731,7 @@ impl<'src> Lexer<'src> {
         {
             self.pos += 1;
         }
-        let text = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
+        let text = core::str::from_utf8(&self.src[start..self.pos]).unwrap();
         let token = match text {
             "and"      => Token::KwAnd,
             "break"    => Token::KwBreak,

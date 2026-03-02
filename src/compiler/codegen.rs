@@ -1,3 +1,6 @@
+#[cfg(not(feature = "std"))]
+use alloc::{format, string::{String, ToString}, vec, vec::Vec};
+
 use super::error::CompileError;
 use super::proto::{Constant, FunctionProto, Instruction, UpvalueDesc};
 use crate::parser::ast::{

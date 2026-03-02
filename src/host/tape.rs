@@ -10,11 +10,13 @@
 //! suitable for execution inside a zkVM guest.
 
 use sha2::{Digest, Sha256};
+#[cfg(not(feature = "std"))]
+use alloc::{borrow::ToOwned, format, string::{String, ToString}, vec::Vec};
 
 use crate::{
-    host::transcript::ToolCallRecord,
+    host::{canonicalize::canonical_deserialize, transcript::ToolCallRecord},
     types::{table::LuaTable, value::LuaValue},
-    vm::{builtins::decode_json_bytes, engine::HostInterface},
+    vm::engine::HostInterface,
 };
 
 // ── TapeEntry ────────────────────────────────────────────────────────────────
@@ -22,6 +24,7 @@ use crate::{
 /// One entry on the oracle tape — either a successful response payload
 /// (canonical JSON bytes) or an error message string.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TapeEntry {
     /// Successful tool response: canonical JSON bytes of the response table.
     Ok(Vec<u8>),
@@ -36,6 +39,7 @@ pub enum TapeEntry {
 /// Constructed from a `Transcript` after a dry run, then handed to
 /// `TapeHost` for deterministic replay.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OracleTape {
     pub entries: Vec<TapeEntry>,
 }
@@ -67,7 +71,7 @@ impl OracleTape {
     /// - 1 byte tag: `0x00` = Ok, `0x01` = Err
     /// - 4-byte little-endian length of payload
     /// - payload bytes
-    pub fn commitment_hash(&self) -> String {
+    pub fn commitment_hash(&self) -> [u8; 32] {
         let mut h = Sha256::new();
         for entry in &self.entries {
             match entry {
@@ -84,7 +88,12 @@ impl OracleTape {
                 }
             }
         }
-        h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+        h.finalize().into()
+    }
+
+    /// Hex-encoded SHA-256 commitment hash (64 lowercase hex chars).
+    pub fn commitment_hash_hex(&self) -> String {
+        self.commitment_hash().iter().map(|b| format!("{b:02x}")).collect()
     }
 
     pub fn len(&self) -> usize {
@@ -137,8 +146,8 @@ impl HostInterface for TapeHost {
 
         match entry {
             TapeEntry::Ok(bytes) => {
-                let value = decode_json_bytes(bytes)
-                    .map_err(|e| format!("tape decode error: {e}"))?;
+                let value = canonical_deserialize(bytes)
+                    .map_err(|e| format!("tape decode error: {e:?}"))?;
                 match value {
                     LuaValue::Table(t) => Ok(t.borrow().clone()),
                     _ => Err(format!(
@@ -234,9 +243,16 @@ mod tests {
     // ── OracleTape::commitment_hash ───────────────────────────────────────────
 
     #[test]
-    fn commitment_hash_is_64_hex_chars() {
+    fn commitment_hash_is_32_bytes() {
         let tape = OracleTape::from_records(&[ok_record(0, b"{}")]);
         let h = tape.commitment_hash();
+        assert_eq!(h.len(), 32);
+    }
+
+    #[test]
+    fn commitment_hash_hex_is_64_hex_chars() {
+        let tape = OracleTape::from_records(&[ok_record(0, b"{}")]);
+        let h = tape.commitment_hash_hex();
         assert_eq!(h.len(), 64);
         assert!(h.chars().all(|c| c.is_ascii_hexdigit()));
     }

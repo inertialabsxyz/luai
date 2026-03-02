@@ -1,4 +1,7 @@
+#[cfg(feature = "std")]
 use std::{cell::RefCell, rc::Rc, sync::Arc};
+#[cfg(not(feature = "std"))]
+use {alloc::{rc::Rc, string::{String, ToString}, sync::Arc, vec::Vec}, core::cell::RefCell};
 
 use crate::types::table::{LuaKey, LuaTable};
 pub const MAX_TABLE_ENTRIES: usize = 50_000;
@@ -12,6 +15,7 @@ pub enum LuaError {
 
 /// Identifies a built-in standard library function by a stable tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BuiltinId {
     // Core
     Type,
@@ -48,16 +52,18 @@ pub enum BuiltinId {
 
 /// A Lua closure: a function prototype index plus captured upvalues.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LuaClosure {
     pub proto_idx: usize,
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub upvalues: Vec<Rc<RefCell<LuaValue>>>,
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LuaString(Arc<[u8]>);
 
-impl std::fmt::Debug for LuaString {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for LuaString {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "\"{}\"", String::from_utf8_lossy(&self.0))
     }
 }
@@ -140,7 +146,7 @@ impl PartialEq for LuaValue {
 impl LuaValue {
     /// Returns Ok(Ordering) if the two values support comparison.
     /// Returns Err(LuaError(Type)) otherwise.
-    pub fn lua_cmp(&self, other: &Self) -> Result<std::cmp::Ordering, LuaError> {
+    pub fn lua_cmp(&self, other: &Self) -> Result<core::cmp::Ordering, LuaError> {
         match (self, other) {
             (LuaValue::Integer(a), LuaValue::Integer(b)) => Ok(a.cmp(b)),
             (LuaValue::String(a), LuaValue::String(b)) => Ok(a.cmp(b)),
@@ -245,8 +251,8 @@ impl From<LuaKey> for LuaValue {
     }
 }
 
-impl std::fmt::Display for LuaValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for LuaValue {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             LuaValue::Nil => write!(f, "nil"),
             LuaValue::Boolean(b) => write!(f, "{}", b),
@@ -327,6 +333,93 @@ impl LuaValue {
     }
     pub fn lua_unm(&self) -> Result<Self, LuaError> {
         Ok(LuaValue::Integer(self.as_integer()?.wrapping_neg()))
+    }
+}
+
+// ── Serde impls ────────────────────────────────────────────────────────────────
+
+#[cfg(feature = "serde")]
+mod serde_impls {
+    use super::*;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    // ── LuaString ─────────────────────────────────────────────────────────────
+
+    impl Serialize for LuaString {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            s.serialize_bytes(self.as_bytes())
+        }
+    }
+
+    impl<'de> Deserialize<'de> for LuaString {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            struct BytesVisitor;
+            impl<'de> serde::de::Visitor<'de> for BytesVisitor {
+                type Value = LuaString;
+                fn expecting(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+                    write!(f, "byte sequence")
+                }
+                fn visit_bytes<E: serde::de::Error>(self, v: &[u8]) -> Result<LuaString, E> {
+                    Ok(LuaString::from_bytes(v))
+                }
+                fn visit_byte_buf<E: serde::de::Error>(self, v: Vec<u8>) -> Result<LuaString, E> {
+                    Ok(LuaString::from_bytes(&v))
+                }
+                fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                    self,
+                    mut seq: A,
+                ) -> Result<LuaString, A::Error> {
+                    let mut bytes = Vec::new();
+                    while let Some(b) = seq.next_element::<u8>()? {
+                        bytes.push(b);
+                    }
+                    Ok(LuaString::from_bytes(&bytes))
+                }
+            }
+            d.deserialize_bytes(BytesVisitor)
+        }
+    }
+
+    // ── LuaValue ──────────────────────────────────────────────────────────────
+
+    /// Helper enum that mirrors LuaValue but without Rc<RefCell<>> wrappers.
+    /// Used to drive serde derive for LuaValue serialization.
+    #[derive(Serialize, Deserialize)]
+    enum LuaValueHelper {
+        Nil,
+        Boolean(bool),
+        Integer(i64),
+        String(LuaString),
+        Table(LuaTable),
+    }
+
+    impl Serialize for LuaValue {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            let helper = match self {
+                LuaValue::Nil => LuaValueHelper::Nil,
+                LuaValue::Boolean(b) => LuaValueHelper::Boolean(*b),
+                LuaValue::Integer(n) => LuaValueHelper::Integer(*n),
+                LuaValue::String(st) => LuaValueHelper::String(st.clone()),
+                LuaValue::Table(t) => LuaValueHelper::Table(t.borrow().clone()),
+                LuaValue::Function(_) | LuaValue::Builtin(_) => {
+                    return Err(serde::ser::Error::custom("functions cannot be serialized"));
+                }
+            };
+            helper.serialize(s)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for LuaValue {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            let helper = LuaValueHelper::deserialize(d)?;
+            Ok(match helper {
+                LuaValueHelper::Nil => LuaValue::Nil,
+                LuaValueHelper::Boolean(b) => LuaValue::Boolean(b),
+                LuaValueHelper::Integer(n) => LuaValue::Integer(n),
+                LuaValueHelper::String(st) => LuaValue::String(st),
+                LuaValueHelper::Table(t) => LuaValue::Table(Rc::new(RefCell::new(t))),
+            })
+        }
     }
 }
 

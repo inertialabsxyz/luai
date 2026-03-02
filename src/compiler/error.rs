@@ -1,3 +1,6 @@
+#[cfg(not(feature = "std"))]
+use alloc::{format, string::String};
+
 /// Errors produced during compilation (AST → bytecode).
 #[derive(Debug, PartialEq)]
 pub enum CompileError {

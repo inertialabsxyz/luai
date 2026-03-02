@@ -13,6 +13,10 @@ use crate::{
     },
     vm::gas::VmError,
 };
+#[cfg(not(feature = "std"))]
+use alloc::{format, rc::Rc, string::{String, ToString}, vec, vec::Vec};
+#[cfg(not(feature = "std"))]
+use core::cell::RefCell;
 
 const MAX_TABLE_DEPTH: usize = 32;
 const MAX_STRING_LEN: usize = 65536; // 64 KB
@@ -23,6 +27,7 @@ pub enum CanonError {
     FunctionNotSerializable,
     TableDepthExceeded,
     StringTooLong,
+    InvalidInput,
 }
 
 impl From<CanonError> for VmError {
@@ -32,6 +37,7 @@ impl From<CanonError> for VmError {
             CanonError::FunctionNotSerializable => "json.encode: functions not serializable",
             CanonError::TableDepthExceeded => "json.encode: table depth exceeded",
             CanonError::StringTooLong => "string length overflow",
+            CanonError::InvalidInput => "canonical_deserialize: invalid input",
         };
         VmError::RuntimeError(LuaValue::String(LuaString::from_str(msg)))
     }
@@ -59,6 +65,185 @@ pub fn canonical_serialize_table(t: &LuaTable) -> Result<Vec<u8>, CanonError> {
 /// full buffer. Used for quota pre-checks.
 pub fn canonical_byte_len(v: &LuaValue) -> Result<usize, CanonError> {
     Ok(canonical_serialize(v)?.len())
+}
+
+// ── Deserialization ────────────────────────────────────────────────────────────
+
+/// Deserialize canonical JSON bytes back into a `LuaValue`.
+///
+/// Inverse of `canonical_serialize` for the subset of values that can round-trip:
+/// nil, bool, integer, string, and table (nested). Functions/closures cannot
+/// appear in serialized form and are never produced by this function.
+pub fn canonical_deserialize(bytes: &[u8]) -> Result<LuaValue, CanonError> {
+    let (v, rest) = deser_value(bytes)?;
+    let rest = trim_leading_whitespace(rest);
+    if !rest.is_empty() {
+        return Err(CanonError::InvalidInput);
+    }
+    Ok(v)
+}
+
+fn trim_leading_whitespace(s: &[u8]) -> &[u8] {
+    let pos = s.iter().position(|&b| !matches!(b, b' ' | b'\t' | b'\n' | b'\r')).unwrap_or(s.len());
+    &s[pos..]
+}
+
+/// Parse a JSON value from `bytes`, returning `(value, remaining_bytes)`.
+fn deser_value(bytes: &[u8]) -> Result<(LuaValue, &[u8]), CanonError> {
+    let bytes = trim_leading_whitespace(bytes);
+    if bytes.is_empty() {
+        return Err(CanonError::InvalidInput);
+    }
+    match bytes[0] {
+        b'n' => {
+            if bytes.starts_with(b"null") { Ok((LuaValue::Nil, &bytes[4..])) }
+            else { Err(CanonError::InvalidInput) }
+        }
+        b't' => {
+            if bytes.starts_with(b"true") { Ok((LuaValue::Boolean(true), &bytes[4..])) }
+            else { Err(CanonError::InvalidInput) }
+        }
+        b'f' => {
+            if bytes.starts_with(b"false") { Ok((LuaValue::Boolean(false), &bytes[5..])) }
+            else { Err(CanonError::InvalidInput) }
+        }
+        b'"' => {
+            let (s_val, rest) = deser_string(&bytes[1..])?;
+            Ok((LuaValue::String(crate::types::value::LuaString::from_bytes(&s_val)), rest))
+        }
+        b'[' => deser_array(&bytes[1..]),
+        b'{' => deser_object(&bytes[1..]),
+        b'-' | b'0'..=b'9' => deser_integer(bytes),
+        _ => Err(CanonError::InvalidInput),
+    }
+}
+
+/// Parse a JSON string (starting after the opening `"`), returning `(bytes, remaining)`.
+fn deser_string(s: &[u8]) -> Result<(Vec<u8>, &[u8]), CanonError> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < s.len() {
+        match s[i] {
+            b'"' => return Ok((out, &s[i + 1..])),
+            b'\\' => {
+                i += 1;
+                if i >= s.len() { return Err(CanonError::InvalidInput); }
+                match s[i] {
+                    b'"'  => { out.push(b'"');  i += 1; }
+                    b'\\' => { out.push(b'\\'); i += 1; }
+                    b'/'  => { out.push(b'/');  i += 1; }
+                    b'n'  => { out.push(b'\n'); i += 1; }
+                    b'r'  => { out.push(b'\r'); i += 1; }
+                    b't'  => { out.push(b'\t'); i += 1; }
+                    b'u'  => {
+                        if i + 4 >= s.len() { return Err(CanonError::InvalidInput); }
+                        let hex = core::str::from_utf8(&s[i + 1..i + 5])
+                            .map_err(|_| CanonError::InvalidInput)?;
+                        let cp = u16::from_str_radix(hex, 16)
+                            .map_err(|_| CanonError::InvalidInput)?;
+                        // Canonical: \uXXXX encodes single bytes 0x00..=0xff
+                        out.push(cp as u8);
+                        i += 5;
+                    }
+                    _ => return Err(CanonError::InvalidInput),
+                }
+            }
+            b => { out.push(b); i += 1; }
+        }
+    }
+    Err(CanonError::InvalidInput) // missing closing "
+}
+
+/// Parse a JSON array (starting after the opening `[`).
+fn deser_array(s: &[u8]) -> Result<(LuaValue, &[u8]), CanonError> {
+    #[cfg(feature = "std")]
+    use std::{cell::RefCell, rc::Rc};
+    use crate::types::table::{LuaKey, LuaTable};
+
+    let mut t = LuaTable::new();
+    let s = trim_leading_whitespace(s);
+    if s.first() == Some(&b']') {
+        return Ok((LuaValue::Table(Rc::new(RefCell::new(t))), &s[1..]));
+    }
+    let mut idx: i64 = 1;
+    let mut rest = s;
+    loop {
+        let (val, after) = deser_value(rest)?;
+        t.rawset(LuaKey::Integer(idx), val).map_err(|_| CanonError::InvalidInput)?;
+        idx += 1;
+        let after = trim_leading_whitespace(after);
+        if after.first() == Some(&b']') {
+            return Ok((LuaValue::Table(Rc::new(RefCell::new(t))), &after[1..]));
+        }
+        if after.first() == Some(&b',') {
+            rest = &after[1..];
+        } else {
+            return Err(CanonError::InvalidInput);
+        }
+    }
+}
+
+/// Parse a JSON object (starting after the opening `{`).
+fn deser_object(s: &[u8]) -> Result<(LuaValue, &[u8]), CanonError> {
+    #[cfg(feature = "std")]
+    use std::{cell::RefCell, rc::Rc};
+    use crate::types::table::{LuaKey, LuaTable};
+    use crate::types::value::LuaString;
+
+    let mut t = LuaTable::new();
+    let s = trim_leading_whitespace(s);
+    if s.first() == Some(&b'}') {
+        return Ok((LuaValue::Table(Rc::new(RefCell::new(t))), &s[1..]));
+    }
+    let mut rest = s;
+    loop {
+        let r = trim_leading_whitespace(rest);
+        if r.first() != Some(&b'"') {
+            return Err(CanonError::InvalidInput);
+        }
+        let (key_bytes, after_key) = deser_string(&r[1..])?;
+        let after_key = trim_leading_whitespace(after_key);
+        if after_key.first() != Some(&b':') {
+            return Err(CanonError::InvalidInput);
+        }
+        let (val, after_val) = deser_value(&after_key[1..])?;
+
+        // Determine the key type: integer string → integer key; "true"/"false" → bool; else string
+        let lua_key = if let Some(n) = core::str::from_utf8(&key_bytes)
+            .ok()
+            .and_then(|s| s.parse::<i64>().ok())
+        {
+            LuaKey::Integer(n)
+        } else if key_bytes == b"true" {
+            LuaKey::Boolean(true)
+        } else if key_bytes == b"false" {
+            LuaKey::Boolean(false)
+        } else {
+            LuaKey::String(LuaString::from_bytes(&key_bytes))
+        };
+
+        t.rawset(lua_key, val).map_err(|_| CanonError::InvalidInput)?;
+
+        let after_val = trim_leading_whitespace(after_val);
+        if after_val.first() == Some(&b'}') {
+            return Ok((LuaValue::Table(Rc::new(RefCell::new(t))), &after_val[1..]));
+        }
+        if after_val.first() == Some(&b',') {
+            rest = &after_val[1..];
+        } else {
+            return Err(CanonError::InvalidInput);
+        }
+    }
+}
+
+/// Parse a JSON integer (no floats in canonical format).
+fn deser_integer(s: &[u8]) -> Result<(LuaValue, &[u8]), CanonError> {
+    let end = s.iter()
+        .position(|&b| !matches!(b, b'-' | b'0'..=b'9'))
+        .unwrap_or(s.len());
+    let n_str = core::str::from_utf8(&s[..end]).map_err(|_| CanonError::InvalidInput)?;
+    let n: i64 = n_str.parse().map_err(|_| CanonError::InvalidInput)?;
+    Ok((LuaValue::Integer(n), &s[end..]))
 }
 
 fn serialize_value(v: &LuaValue, depth: usize) -> Result<Vec<u8>, CanonError> {
@@ -385,5 +570,118 @@ mod tests {
     fn empty_table_is_object() {
         let t = make_table();
         assert_eq!(encode_table(&t.borrow()), "{}");
+    }
+
+    // ── canonical_deserialize round-trip tests ────────────────────────────────
+
+    fn round_trip(v: &LuaValue) -> LuaValue {
+        let bytes = canonical_serialize(v).unwrap();
+        canonical_deserialize(&bytes).unwrap()
+    }
+
+    #[test]
+    fn deser_nil_round_trip() {
+        assert_eq!(round_trip(&LuaValue::Nil), LuaValue::Nil);
+    }
+
+    #[test]
+    fn deser_bool_true_round_trip() {
+        assert_eq!(round_trip(&LuaValue::Boolean(true)), LuaValue::Boolean(true));
+    }
+
+    #[test]
+    fn deser_bool_false_round_trip() {
+        assert_eq!(round_trip(&LuaValue::Boolean(false)), LuaValue::Boolean(false));
+    }
+
+    #[test]
+    fn deser_integer_positive() {
+        assert_eq!(round_trip(&int(42)), int(42));
+    }
+
+    #[test]
+    fn deser_integer_negative() {
+        assert_eq!(round_trip(&int(-1)), int(-1));
+    }
+
+    #[test]
+    fn deser_integer_min_max() {
+        assert_eq!(round_trip(&int(i64::MAX)), int(i64::MAX));
+        assert_eq!(round_trip(&int(i64::MIN)), int(i64::MIN));
+    }
+
+    #[test]
+    fn deser_string_simple() {
+        assert_eq!(round_trip(&s("hello")), s("hello"));
+    }
+
+    #[test]
+    fn deser_string_with_escapes() {
+        assert_eq!(round_trip(&s("a\"b")), s("a\"b"));
+        assert_eq!(round_trip(&s("a\\b")), s("a\\b"));
+        assert_eq!(round_trip(&s("a\nb")), s("a\nb"));
+    }
+
+    #[test]
+    fn deser_string_non_ascii() {
+        let v = LuaValue::String(LuaString::from_bytes(&[0x80u8]));
+        assert_eq!(round_trip(&v), v);
+    }
+
+    #[test]
+    fn deser_array_table_round_trip() {
+        let t = make_table();
+        t.borrow_mut().rawset(LuaKey::Integer(1), int(10)).unwrap();
+        t.borrow_mut().rawset(LuaKey::Integer(2), int(20)).unwrap();
+        t.borrow_mut().rawset(LuaKey::Integer(3), int(30)).unwrap();
+        let v = LuaValue::Table(t);
+        let bytes = canonical_serialize(&v).unwrap();
+        let restored = canonical_deserialize(&bytes).unwrap();
+        let rt = restored.as_table().unwrap();
+        let tb = rt.borrow();
+        assert_eq!(tb.get(&LuaKey::Integer(1)), Some(&int(10)));
+        assert_eq!(tb.get(&LuaKey::Integer(2)), Some(&int(20)));
+        assert_eq!(tb.get(&LuaKey::Integer(3)), Some(&int(30)));
+    }
+
+    #[test]
+    fn deser_object_table_round_trip() {
+        let t = make_table();
+        t.borrow_mut().rawset(LuaKey::String(LuaString::from_str("a")), int(1)).unwrap();
+        t.borrow_mut().rawset(LuaKey::String(LuaString::from_str("b")), int(2)).unwrap();
+        let v = LuaValue::Table(t);
+        let bytes = canonical_serialize(&v).unwrap();
+        let restored = canonical_deserialize(&bytes).unwrap();
+        let rt = restored.as_table().unwrap();
+        let tb = rt.borrow();
+        assert_eq!(tb.get(&LuaKey::String(LuaString::from_str("a"))), Some(&int(1)));
+        assert_eq!(tb.get(&LuaKey::String(LuaString::from_str("b"))), Some(&int(2)));
+    }
+
+    #[test]
+    fn deser_nested_table_round_trip() {
+        let inner = make_table();
+        inner.borrow_mut().rawset(LuaKey::String(LuaString::from_str("x")), int(99)).unwrap();
+        let outer = make_table();
+        outer.borrow_mut().rawset(
+            LuaKey::String(LuaString::from_str("inner")),
+            LuaValue::Table(inner),
+        ).unwrap();
+        let v = LuaValue::Table(outer);
+        let bytes = canonical_serialize(&v).unwrap();
+        let restored = canonical_deserialize(&bytes).unwrap();
+        let rt = restored.as_table().unwrap();
+        let tb = rt.borrow();
+        let inner_v = tb.get(&LuaKey::String(LuaString::from_str("inner"))).unwrap();
+        let inner_t = inner_v.as_table().unwrap();
+        let inner_tb = inner_t.borrow();
+        assert_eq!(inner_tb.get(&LuaKey::String(LuaString::from_str("x"))), Some(&int(99)));
+    }
+
+    #[test]
+    fn deser_invalid_input_error() {
+        assert_eq!(canonical_deserialize(b"not_json"), Err(CanonError::InvalidInput));
+        assert_eq!(canonical_deserialize(b""), Err(CanonError::InvalidInput));
+        assert_eq!(canonical_deserialize(b"42 extra"), Err(CanonError::InvalidInput));
     }
 }

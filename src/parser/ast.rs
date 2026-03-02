@@ -1,3 +1,6 @@
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, string::String, vec::Vec};
+
 use super::lexer::Span;
 
 // ---------------------------------------------------------------------------
