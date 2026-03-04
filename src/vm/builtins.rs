@@ -6,7 +6,16 @@
 #[cfg(feature = "std")]
 use std::{cell::RefCell, rc::Rc};
 #[cfg(not(feature = "std"))]
-use {alloc::{format, rc::Rc, string::{String, ToString}, vec, vec::Vec}, core::cell::RefCell};
+use {
+    alloc::{
+        format,
+        rc::Rc,
+        string::{String, ToString},
+        vec,
+        vec::Vec,
+    },
+    core::cell::RefCell,
+};
 
 use crate::{
     types::{
@@ -79,7 +88,6 @@ pub fn call_builtin(
         // ── json ──────────────────────────────────────────────────────────────
         BuiltinId::JsonEncode => json_encode(args, gas, mem),
         BuiltinId::JsonDecode => json_decode(args, gas, mem),
-
         // log/error are handled as dedicated opcodes; if somehow called as builtins,
         // treat log here for consistency.
     }
@@ -225,9 +233,9 @@ fn builtin_select(args: &[LuaValue], gas: &mut GasMeter) -> Result<Vec<LuaValue>
             let len = rest.len() as i64;
             let idx = if n < 0 { len + n } else { n - 1 };
             if idx < 0 || idx >= len {
-                return Err(VmError::RuntimeError(LuaValue::String(LuaString::from_str(
-                    "bad argument #1 to 'select' (index out of range)",
-                ))));
+                return Err(VmError::RuntimeError(LuaValue::String(
+                    LuaString::from_str("bad argument #1 to 'select' (index out of range)"),
+                )));
             }
             Ok(vec![rest[idx as usize].clone()])
         }
@@ -344,7 +352,10 @@ fn string_sub(
 /// Check for Lua pattern metacharacters; error if found.
 fn check_no_pattern_metachar(pattern: &[u8]) -> Result<(), VmError> {
     for &b in pattern {
-        if matches!(b, b'^' | b'$' | b'(' | b')' | b'%' | b'.' | b'[' | b']' | b'*' | b'+' | b'-' | b'?') {
+        if matches!(
+            b,
+            b'^' | b'$' | b'(' | b')' | b'%' | b'.' | b'[' | b']' | b'*' | b'+' | b'-' | b'?'
+        ) {
             return Err(runtime_err(
                 "string patterns not supported; use literal string.find only",
             ));
@@ -392,9 +403,7 @@ fn string_find(args: &[LuaValue], gas: &mut GasMeter) -> Result<Vec<LuaValue>, V
     }
 
     let search_space = &haystack[init..];
-    let found = search_space
-        .windows(needle.len())
-        .position(|w| w == needle);
+    let found = search_space.windows(needle.len()).position(|w| w == needle);
 
     match found {
         Some(offset) => {
@@ -416,7 +425,11 @@ fn string_upper(
     let s = require_string(args, 0, "string.upper")?;
     gas.charge(s.len() as u64)?;
     mem.track_alloc(alloc_size::string(s.len()))?;
-    let result: Vec<u8> = s.as_bytes().iter().map(|b| b.to_ascii_uppercase()).collect();
+    let result: Vec<u8> = s
+        .as_bytes()
+        .iter()
+        .map(|b| b.to_ascii_uppercase())
+        .collect();
     Ok(vec![LuaValue::String(LuaString::from_bytes(&result))])
 }
 
@@ -428,7 +441,11 @@ fn string_lower(
     let s = require_string(args, 0, "string.lower")?;
     gas.charge(s.len() as u64)?;
     mem.track_alloc(alloc_size::string(s.len()))?;
-    let result: Vec<u8> = s.as_bytes().iter().map(|b| b.to_ascii_lowercase()).collect();
+    let result: Vec<u8> = s
+        .as_bytes()
+        .iter()
+        .map(|b| b.to_ascii_lowercase())
+        .collect();
     Ok(vec![LuaValue::String(LuaString::from_bytes(&result))])
 }
 
@@ -588,9 +605,12 @@ fn string_format(
                 ));
             }
             other => {
-                return Err(VmError::RuntimeError(LuaValue::String(LuaString::from_str(
-                    &format!("string.format: unsupported format specifier '%{}'", other as char),
-                ))));
+                return Err(VmError::RuntimeError(LuaValue::String(
+                    LuaString::from_str(&format!(
+                        "string.format: unsupported format specifier '%{}'",
+                        other as char
+                    )),
+                )));
             }
         }
     }
@@ -829,8 +849,8 @@ fn table_concat(
         }
     }
 
-    let result_len = parts.iter().map(|p| p.len()).sum::<usize>()
-        + sep.len() * parts.len().saturating_sub(1);
+    let result_len =
+        parts.iter().map(|p| p.len()).sum::<usize>() + sep.len() * parts.len().saturating_sub(1);
     check_string_len(result_len)?;
     gas.charge(result_len as u64)?;
     mem.track_alloc(alloc_size::string(result_len))?;
@@ -987,8 +1007,7 @@ fn json_encode(
     mem: &mut MemoryMeter,
 ) -> Result<Vec<LuaValue>, VmError> {
     let v = require_arg(args, 0, "json.encode")?;
-    let result = crate::host::canonicalize::canonical_serialize(v)
-        .map_err(VmError::from)?;
+    let result = crate::host::canonicalize::canonical_serialize(v).map_err(VmError::from)?;
     check_string_len(result.len())?;
     gas.charge(result.len() as u64)?;
     mem.track_alloc(alloc_size::string(result.len()))?;
@@ -1021,7 +1040,12 @@ struct JsonParser<'a> {
 
 impl<'a> JsonParser<'a> {
     fn new(input: &'a [u8], mem: &'a mut MemoryMeter) -> Self {
-        JsonParser { input, pos: 0, depth: 0, mem }
+        JsonParser {
+            input,
+            pos: 0,
+            depth: 0,
+            mem,
+        }
     }
 
     fn peek(&self) -> Option<u8> {
@@ -1106,14 +1130,38 @@ impl<'a> JsonParser<'a> {
                 Some(b'\\') => {
                     self.pos += 1;
                     match self.peek() {
-                        Some(b'"') => { buf.push(b'"'); self.pos += 1; }
-                        Some(b'\\') => { buf.push(b'\\'); self.pos += 1; }
-                        Some(b'/') => { buf.push(b'/'); self.pos += 1; }
-                        Some(b'n') => { buf.push(b'\n'); self.pos += 1; }
-                        Some(b'r') => { buf.push(b'\r'); self.pos += 1; }
-                        Some(b't') => { buf.push(b'\t'); self.pos += 1; }
-                        Some(b'b') => { buf.push(0x08); self.pos += 1; }
-                        Some(b'f') => { buf.push(0x0C); self.pos += 1; }
+                        Some(b'"') => {
+                            buf.push(b'"');
+                            self.pos += 1;
+                        }
+                        Some(b'\\') => {
+                            buf.push(b'\\');
+                            self.pos += 1;
+                        }
+                        Some(b'/') => {
+                            buf.push(b'/');
+                            self.pos += 1;
+                        }
+                        Some(b'n') => {
+                            buf.push(b'\n');
+                            self.pos += 1;
+                        }
+                        Some(b'r') => {
+                            buf.push(b'\r');
+                            self.pos += 1;
+                        }
+                        Some(b't') => {
+                            buf.push(b'\t');
+                            self.pos += 1;
+                        }
+                        Some(b'b') => {
+                            buf.push(0x08);
+                            self.pos += 1;
+                        }
+                        Some(b'f') => {
+                            buf.push(0x0C);
+                            self.pos += 1;
+                        }
                         Some(b'u') => {
                             self.pos += 1;
                             if self.pos + 4 > self.input.len() {
@@ -1186,15 +1234,21 @@ impl<'a> JsonParser<'a> {
         loop {
             let v = self.parse_value()?;
             let old_cap = t.borrow().capacity();
-            let rs = t.borrow_mut()
+            let rs = t
+                .borrow_mut()
                 .rawset_tracked(LuaKey::Integer(idx), v)
                 .map_err(|e| VmError::from(e))?;
             charge_rawset_result(rs, old_cap, &t, self.mem)?;
             idx += 1;
             self.skip_ws();
             match self.peek() {
-                Some(b',') => { self.pos += 1; }
-                Some(b']') => { self.pos += 1; break; }
+                Some(b',') => {
+                    self.pos += 1;
+                }
+                Some(b']') => {
+                    self.pos += 1;
+                    break;
+                }
                 _ => return Err(runtime_err("json.decode: expected ',' or ']' in array")),
             }
         }
@@ -1228,14 +1282,20 @@ impl<'a> JsonParser<'a> {
             self.expect(b':')?;
             let v = self.parse_value()?;
             let old_cap = t.borrow().capacity();
-            let rs = t.borrow_mut()
+            let rs = t
+                .borrow_mut()
                 .rawset_tracked(key, v)
                 .map_err(|e| VmError::from(e))?;
             charge_rawset_result(rs, old_cap, &t, self.mem)?;
             self.skip_ws();
             match self.peek() {
-                Some(b',') => { self.pos += 1; }
-                Some(b'}') => { self.pos += 1; break; }
+                Some(b',') => {
+                    self.pos += 1;
+                }
+                Some(b'}') => {
+                    self.pos += 1;
+                    break;
+                }
                 _ => return Err(runtime_err("json.decode: expected ',' or '}' in object")),
             }
         }
@@ -1261,7 +1321,7 @@ fn json_parse(
 /// Used by `TapeHost` to decode pre-recorded tool responses from an
 /// `OracleTape`. The resulting value is subject to normal VM resource
 /// accounting once the host returns it to the engine.
-pub(crate) fn decode_json_bytes(bytes: &[u8]) -> Result<LuaValue, String> {
+pub fn decode_json_bytes(bytes: &[u8]) -> Result<LuaValue, String> {
     let mut mem = MemoryMeter::new(u64::MAX);
     json_parse(bytes, 0, &mut mem)
         .map(|(v, _)| v)
@@ -1279,7 +1339,10 @@ fn charge_rawset_result(
     use crate::types::table::RawsetResult;
     match result {
         RawsetResult::Updated => {}
-        RawsetResult::Inserted { grew, new_hash_capacity } => {
+        RawsetResult::Inserted {
+            grew,
+            new_hash_capacity,
+        } => {
             if grew {
                 let delta = new_hash_capacity.saturating_sub(old_cap) as u64;
                 mem.track_alloc(delta * alloc_size::table_hash_slot())?;
@@ -1480,28 +1543,43 @@ mod tests {
 
     #[test]
     fn type_nil() {
-        assert_eq!(dispatch(BuiltinId::Type, vec![LuaValue::Nil]).unwrap(), vec![s("nil")]);
+        assert_eq!(
+            dispatch(BuiltinId::Type, vec![LuaValue::Nil]).unwrap(),
+            vec![s("nil")]
+        );
     }
 
     #[test]
     fn type_boolean() {
-        assert_eq!(dispatch(BuiltinId::Type, vec![LuaValue::Boolean(true)]).unwrap(), vec![s("boolean")]);
+        assert_eq!(
+            dispatch(BuiltinId::Type, vec![LuaValue::Boolean(true)]).unwrap(),
+            vec![s("boolean")]
+        );
     }
 
     #[test]
     fn type_integer() {
-        assert_eq!(dispatch(BuiltinId::Type, vec![int(0)]).unwrap(), vec![s("integer")]);
+        assert_eq!(
+            dispatch(BuiltinId::Type, vec![int(0)]).unwrap(),
+            vec![s("integer")]
+        );
     }
 
     #[test]
     fn type_string() {
-        assert_eq!(dispatch(BuiltinId::Type, vec![s("hi")]).unwrap(), vec![s("string")]);
+        assert_eq!(
+            dispatch(BuiltinId::Type, vec![s("hi")]).unwrap(),
+            vec![s("string")]
+        );
     }
 
     #[test]
     fn type_table() {
         let t = tval(make_table());
-        assert_eq!(dispatch(BuiltinId::Type, vec![t]).unwrap(), vec![s("table")]);
+        assert_eq!(
+            dispatch(BuiltinId::Type, vec![t]).unwrap(),
+            vec![s("table")]
+        );
     }
 
     #[test]
@@ -1516,54 +1594,84 @@ mod tests {
 
     #[test]
     fn tostring_nil() {
-        assert_eq!(dispatch(BuiltinId::Tostring, vec![LuaValue::Nil]).unwrap(), vec![s("nil")]);
+        assert_eq!(
+            dispatch(BuiltinId::Tostring, vec![LuaValue::Nil]).unwrap(),
+            vec![s("nil")]
+        );
     }
 
     #[test]
     fn tostring_true() {
-        assert_eq!(dispatch(BuiltinId::Tostring, vec![LuaValue::Boolean(true)]).unwrap(), vec![s("true")]);
+        assert_eq!(
+            dispatch(BuiltinId::Tostring, vec![LuaValue::Boolean(true)]).unwrap(),
+            vec![s("true")]
+        );
     }
 
     #[test]
     fn tostring_false() {
-        assert_eq!(dispatch(BuiltinId::Tostring, vec![LuaValue::Boolean(false)]).unwrap(), vec![s("false")]);
+        assert_eq!(
+            dispatch(BuiltinId::Tostring, vec![LuaValue::Boolean(false)]).unwrap(),
+            vec![s("false")]
+        );
     }
 
     #[test]
     fn tostring_integer() {
-        assert_eq!(dispatch(BuiltinId::Tostring, vec![int(-42)]).unwrap(), vec![s("-42")]);
+        assert_eq!(
+            dispatch(BuiltinId::Tostring, vec![int(-42)]).unwrap(),
+            vec![s("-42")]
+        );
     }
 
     #[test]
     fn tostring_string_identity() {
-        assert_eq!(dispatch(BuiltinId::Tostring, vec![s("hello")]).unwrap(), vec![s("hello")]);
+        assert_eq!(
+            dispatch(BuiltinId::Tostring, vec![s("hello")]).unwrap(),
+            vec![s("hello")]
+        );
     }
 
     // ── tonumber ──────────────────────────────────────────────────────────────
 
     #[test]
     fn tonumber_integer_passthrough() {
-        assert_eq!(dispatch(BuiltinId::Tonumber, vec![int(5)]).unwrap(), vec![int(5)]);
+        assert_eq!(
+            dispatch(BuiltinId::Tonumber, vec![int(5)]).unwrap(),
+            vec![int(5)]
+        );
     }
 
     #[test]
     fn tonumber_valid_string() {
-        assert_eq!(dispatch(BuiltinId::Tonumber, vec![s("42")]).unwrap(), vec![int(42)]);
+        assert_eq!(
+            dispatch(BuiltinId::Tonumber, vec![s("42")]).unwrap(),
+            vec![int(42)]
+        );
     }
 
     #[test]
     fn tonumber_string_with_whitespace() {
-        assert_eq!(dispatch(BuiltinId::Tonumber, vec![s("  -7  ")]).unwrap(), vec![int(-7)]);
+        assert_eq!(
+            dispatch(BuiltinId::Tonumber, vec![s("  -7  ")]).unwrap(),
+            vec![int(-7)]
+        );
     }
 
     #[test]
     fn tonumber_invalid_string() {
-        assert_eq!(dispatch(BuiltinId::Tonumber, vec![s("3.14")]).unwrap(), vec![LuaValue::Nil]);
+        assert_eq!(
+            dispatch(BuiltinId::Tonumber, vec![s("3.14")]).unwrap(),
+            vec![LuaValue::Nil]
+        );
     }
 
     #[test]
     fn tonumber_nil_returns_nil() {
-        assert_eq!(dispatch(BuiltinId::Tonumber, vec![LuaValue::Nil]).unwrap(), vec![LuaValue::Nil]);
+        assert_eq!(
+            dispatch(BuiltinId::Tonumber, vec![LuaValue::Nil]).unwrap(),
+            vec![LuaValue::Nil]
+        );
     }
 
     // ── select ────────────────────────────────────────────────────────────────
@@ -1602,7 +1710,9 @@ mod tests {
     fn unpack_with_range() {
         let t = make_table();
         for i in 1..=5 {
-            t.borrow_mut().rawset(LuaKey::Integer(i), int(i * 10)).unwrap();
+            t.borrow_mut()
+                .rawset(LuaKey::Integer(i), int(i * 10))
+                .unwrap();
         }
         let result = dispatch(BuiltinId::Unpack, vec![tval(t), int(2), int(4)]).unwrap();
         assert_eq!(result, vec![int(20), int(30), int(40)]);
@@ -1612,12 +1722,18 @@ mod tests {
 
     #[test]
     fn string_len_basic() {
-        assert_eq!(dispatch(BuiltinId::StringLen, vec![s("hello")]).unwrap(), vec![int(5)]);
+        assert_eq!(
+            dispatch(BuiltinId::StringLen, vec![s("hello")]).unwrap(),
+            vec![int(5)]
+        );
     }
 
     #[test]
     fn string_len_empty() {
-        assert_eq!(dispatch(BuiltinId::StringLen, vec![s("")]).unwrap(), vec![int(0)]);
+        assert_eq!(
+            dispatch(BuiltinId::StringLen, vec![s("")]).unwrap(),
+            vec![int(0)]
+        );
     }
 
     // ── string.sub ────────────────────────────────────────────────────────────
@@ -1684,36 +1800,54 @@ mod tests {
 
     #[test]
     fn string_upper_basic() {
-        assert_eq!(dispatch(BuiltinId::StringUpper, vec![s("hello")]).unwrap(), vec![s("HELLO")]);
+        assert_eq!(
+            dispatch(BuiltinId::StringUpper, vec![s("hello")]).unwrap(),
+            vec![s("HELLO")]
+        );
     }
 
     #[test]
     fn string_lower_basic() {
-        assert_eq!(dispatch(BuiltinId::StringLower, vec![s("HELLO")]).unwrap(), vec![s("hello")]);
+        assert_eq!(
+            dispatch(BuiltinId::StringLower, vec![s("HELLO")]).unwrap(),
+            vec![s("hello")]
+        );
     }
 
     // ── string.rep ────────────────────────────────────────────────────────────
 
     #[test]
     fn string_rep_basic() {
-        assert_eq!(dispatch(BuiltinId::StringRep, vec![s("ab"), int(3)]).unwrap(), vec![s("ababab")]);
+        assert_eq!(
+            dispatch(BuiltinId::StringRep, vec![s("ab"), int(3)]).unwrap(),
+            vec![s("ababab")]
+        );
     }
 
     #[test]
     fn string_rep_zero() {
-        assert_eq!(dispatch(BuiltinId::StringRep, vec![s("ab"), int(0)]).unwrap(), vec![s("")]);
+        assert_eq!(
+            dispatch(BuiltinId::StringRep, vec![s("ab"), int(0)]).unwrap(),
+            vec![s("")]
+        );
     }
 
     #[test]
     fn string_rep_negative() {
-        assert_eq!(dispatch(BuiltinId::StringRep, vec![s("ab"), int(-1)]).unwrap(), vec![s("")]);
+        assert_eq!(
+            dispatch(BuiltinId::StringRep, vec![s("ab"), int(-1)]).unwrap(),
+            vec![s("")]
+        );
     }
 
     // ── string.byte / char ────────────────────────────────────────────────────
 
     #[test]
     fn string_byte_single() {
-        assert_eq!(dispatch(BuiltinId::StringByte, vec![s("A")]).unwrap(), vec![int(65)]);
+        assert_eq!(
+            dispatch(BuiltinId::StringByte, vec![s("A")]).unwrap(),
+            vec![int(65)]
+        );
     }
 
     #[test]
@@ -1726,7 +1860,10 @@ mod tests {
 
     #[test]
     fn string_char_basic() {
-        assert_eq!(dispatch(BuiltinId::StringChar, vec![int(65), int(66), int(67)]).unwrap(), vec![s("ABC")]);
+        assert_eq!(
+            dispatch(BuiltinId::StringChar, vec![int(65), int(66), int(67)]).unwrap(),
+            vec![s("ABC")]
+        );
     }
 
     #[test]
@@ -1773,7 +1910,11 @@ mod tests {
     #[test]
     fn string_format_multiple() {
         assert_eq!(
-            dispatch(BuiltinId::StringFormat, vec![s("%d + %d = %d"), int(1), int(2), int(3)]).unwrap(),
+            dispatch(
+                BuiltinId::StringFormat,
+                vec![s("%d + %d = %d"), int(1), int(2), int(3)]
+            )
+            .unwrap(),
             vec![s("1 + 2 = 3")]
         );
     }
@@ -1788,39 +1929,60 @@ mod tests {
 
     #[test]
     fn math_abs_positive() {
-        assert_eq!(dispatch(BuiltinId::MathAbs, vec![int(5)]).unwrap(), vec![int(5)]);
+        assert_eq!(
+            dispatch(BuiltinId::MathAbs, vec![int(5)]).unwrap(),
+            vec![int(5)]
+        );
     }
 
     #[test]
     fn math_abs_negative() {
-        assert_eq!(dispatch(BuiltinId::MathAbs, vec![int(-5)]).unwrap(), vec![int(5)]);
+        assert_eq!(
+            dispatch(BuiltinId::MathAbs, vec![int(-5)]).unwrap(),
+            vec![int(5)]
+        );
     }
 
     #[test]
     fn math_abs_zero() {
-        assert_eq!(dispatch(BuiltinId::MathAbs, vec![int(0)]).unwrap(), vec![int(0)]);
+        assert_eq!(
+            dispatch(BuiltinId::MathAbs, vec![int(0)]).unwrap(),
+            vec![int(0)]
+        );
     }
 
     #[test]
     fn math_abs_min_wraps() {
-        assert_eq!(dispatch(BuiltinId::MathAbs, vec![int(i64::MIN)]).unwrap(), vec![int(i64::MIN)]);
+        assert_eq!(
+            dispatch(BuiltinId::MathAbs, vec![int(i64::MIN)]).unwrap(),
+            vec![int(i64::MIN)]
+        );
     }
 
     // ── math.min / max ────────────────────────────────────────────────────────
 
     #[test]
     fn math_min_basic() {
-        assert_eq!(dispatch(BuiltinId::MathMin, vec![int(3), int(1), int(4)]).unwrap(), vec![int(1)]);
+        assert_eq!(
+            dispatch(BuiltinId::MathMin, vec![int(3), int(1), int(4)]).unwrap(),
+            vec![int(1)]
+        );
     }
 
     #[test]
     fn math_max_basic() {
-        assert_eq!(dispatch(BuiltinId::MathMax, vec![int(3), int(1), int(4)]).unwrap(), vec![int(4)]);
+        assert_eq!(
+            dispatch(BuiltinId::MathMax, vec![int(3), int(1), int(4)]).unwrap(),
+            vec![int(4)]
+        );
     }
 
     #[test]
     fn math_min_single() {
-        assert_eq!(dispatch(BuiltinId::MathMin, vec![int(7)]).unwrap(), vec![int(7)]);
+        assert_eq!(
+            dispatch(BuiltinId::MathMin, vec![int(7)]).unwrap(),
+            vec![int(7)]
+        );
     }
 
     // ── math.scale_div ────────────────────────────────────────────────────────
@@ -1828,7 +1990,10 @@ mod tests {
     #[test]
     fn math_scale_div_basic() {
         // (10 * 100) // 3 = 333
-        assert_eq!(dispatch(BuiltinId::MathScaleDiv, vec![int(10), int(3), int(100)]).unwrap(), vec![int(333)]);
+        assert_eq!(
+            dispatch(BuiltinId::MathScaleDiv, vec![int(10), int(3), int(100)]).unwrap(),
+            vec![int(333)]
+        );
     }
 
     #[test]
@@ -1854,7 +2019,11 @@ mod tests {
         let t = make_table();
         t.borrow_mut().rawset(LuaKey::Integer(1), int(1)).unwrap();
         t.borrow_mut().rawset(LuaKey::Integer(2), int(3)).unwrap();
-        dispatch(BuiltinId::TableInsert, vec![tval(Rc::clone(&t)), int(2), int(2)]).unwrap();
+        dispatch(
+            BuiltinId::TableInsert,
+            vec![tval(Rc::clone(&t)), int(2), int(2)],
+        )
+        .unwrap();
         assert_eq!(t.borrow().get(&LuaKey::Integer(1)), Some(&int(1)));
         assert_eq!(t.borrow().get(&LuaKey::Integer(2)), Some(&int(2)));
         assert_eq!(t.borrow().get(&LuaKey::Integer(3)), Some(&int(3)));
@@ -1864,7 +2033,9 @@ mod tests {
     fn table_remove_last() {
         let t = make_table();
         for i in 1..=3 {
-            t.borrow_mut().rawset(LuaKey::Integer(i), int(i * 10)).unwrap();
+            t.borrow_mut()
+                .rawset(LuaKey::Integer(i), int(i * 10))
+                .unwrap();
         }
         let result = dispatch(BuiltinId::TableRemove, vec![tval(Rc::clone(&t))]).unwrap();
         assert_eq!(result, vec![int(30)]);
@@ -1875,7 +2046,9 @@ mod tests {
     fn table_remove_at_pos() {
         let t = make_table();
         for i in 1..=3 {
-            t.borrow_mut().rawset(LuaKey::Integer(i), int(i * 10)).unwrap();
+            t.borrow_mut()
+                .rawset(LuaKey::Integer(i), int(i * 10))
+                .unwrap();
         }
         let result = dispatch(BuiltinId::TableRemove, vec![tval(Rc::clone(&t)), int(2)]).unwrap();
         assert_eq!(result, vec![int(20)]);
@@ -1918,7 +2091,11 @@ mod tests {
                 .rawset(LuaKey::Integer(i), s(&i.to_string()))
                 .unwrap();
         }
-        let result = dispatch(BuiltinId::TableConcat, vec![tval(t), s("-"), int(2), int(4)]).unwrap();
+        let result = dispatch(
+            BuiltinId::TableConcat,
+            vec![tval(t), s("-"), int(2), int(4)],
+        )
+        .unwrap();
         assert_eq!(result, vec![s("2-3-4")]);
     }
 
@@ -1960,9 +2137,15 @@ mod tests {
     fn table_move_basic() {
         let t = make_table();
         for i in 1..=4 {
-            t.borrow_mut().rawset(LuaKey::Integer(i), int(i * 10)).unwrap();
+            t.borrow_mut()
+                .rawset(LuaKey::Integer(i), int(i * 10))
+                .unwrap();
         }
-        dispatch(BuiltinId::TableMove, vec![tval(Rc::clone(&t)), int(1), int(3), int(2)]).unwrap();
+        dispatch(
+            BuiltinId::TableMove,
+            vec![tval(Rc::clone(&t)), int(1), int(3), int(2)],
+        )
+        .unwrap();
         assert_eq!(t.borrow().get(&LuaKey::Integer(2)), Some(&int(10)));
         assert_eq!(t.borrow().get(&LuaKey::Integer(3)), Some(&int(20)));
         assert_eq!(t.borrow().get(&LuaKey::Integer(4)), Some(&int(30)));
@@ -1972,24 +2155,42 @@ mod tests {
 
     #[test]
     fn json_encode_null() {
-        assert_eq!(dispatch(BuiltinId::JsonEncode, vec![LuaValue::Nil]).unwrap(), vec![s("null")]);
+        assert_eq!(
+            dispatch(BuiltinId::JsonEncode, vec![LuaValue::Nil]).unwrap(),
+            vec![s("null")]
+        );
     }
 
     #[test]
     fn json_encode_bool() {
-        assert_eq!(dispatch(BuiltinId::JsonEncode, vec![LuaValue::Boolean(true)]).unwrap(), vec![s("true")]);
-        assert_eq!(dispatch(BuiltinId::JsonEncode, vec![LuaValue::Boolean(false)]).unwrap(), vec![s("false")]);
+        assert_eq!(
+            dispatch(BuiltinId::JsonEncode, vec![LuaValue::Boolean(true)]).unwrap(),
+            vec![s("true")]
+        );
+        assert_eq!(
+            dispatch(BuiltinId::JsonEncode, vec![LuaValue::Boolean(false)]).unwrap(),
+            vec![s("false")]
+        );
     }
 
     #[test]
     fn json_encode_integer() {
-        assert_eq!(dispatch(BuiltinId::JsonEncode, vec![int(42)]).unwrap(), vec![s("42")]);
-        assert_eq!(dispatch(BuiltinId::JsonEncode, vec![int(-1)]).unwrap(), vec![s("-1")]);
+        assert_eq!(
+            dispatch(BuiltinId::JsonEncode, vec![int(42)]).unwrap(),
+            vec![s("42")]
+        );
+        assert_eq!(
+            dispatch(BuiltinId::JsonEncode, vec![int(-1)]).unwrap(),
+            vec![s("-1")]
+        );
     }
 
     #[test]
     fn json_encode_string() {
-        assert_eq!(dispatch(BuiltinId::JsonEncode, vec![s("hello")]).unwrap(), vec![s("\"hello\"")]);
+        assert_eq!(
+            dispatch(BuiltinId::JsonEncode, vec![s("hello")]).unwrap(),
+            vec![s("\"hello\"")]
+        );
     }
 
     #[test]
@@ -2004,7 +2205,9 @@ mod tests {
     fn json_encode_array() {
         let t = make_table();
         for i in 1..=3 {
-            t.borrow_mut().rawset(LuaKey::Integer(i), int(i * 10)).unwrap();
+            t.borrow_mut()
+                .rawset(LuaKey::Integer(i), int(i * 10))
+                .unwrap();
         }
         assert_eq!(
             dispatch(BuiltinId::JsonEncode, vec![tval(t)]).unwrap(),
@@ -2036,19 +2239,34 @@ mod tests {
 
     #[test]
     fn json_decode_null() {
-        assert_eq!(dispatch(BuiltinId::JsonDecode, vec![s("null")]).unwrap(), vec![LuaValue::Nil]);
+        assert_eq!(
+            dispatch(BuiltinId::JsonDecode, vec![s("null")]).unwrap(),
+            vec![LuaValue::Nil]
+        );
     }
 
     #[test]
     fn json_decode_bool() {
-        assert_eq!(dispatch(BuiltinId::JsonDecode, vec![s("true")]).unwrap(), vec![LuaValue::Boolean(true)]);
-        assert_eq!(dispatch(BuiltinId::JsonDecode, vec![s("false")]).unwrap(), vec![LuaValue::Boolean(false)]);
+        assert_eq!(
+            dispatch(BuiltinId::JsonDecode, vec![s("true")]).unwrap(),
+            vec![LuaValue::Boolean(true)]
+        );
+        assert_eq!(
+            dispatch(BuiltinId::JsonDecode, vec![s("false")]).unwrap(),
+            vec![LuaValue::Boolean(false)]
+        );
     }
 
     #[test]
     fn json_decode_integer() {
-        assert_eq!(dispatch(BuiltinId::JsonDecode, vec![s("42")]).unwrap(), vec![int(42)]);
-        assert_eq!(dispatch(BuiltinId::JsonDecode, vec![s("-7")]).unwrap(), vec![int(-7)]);
+        assert_eq!(
+            dispatch(BuiltinId::JsonDecode, vec![s("42")]).unwrap(),
+            vec![int(42)]
+        );
+        assert_eq!(
+            dispatch(BuiltinId::JsonDecode, vec![s("-7")]).unwrap(),
+            vec![int(-7)]
+        );
     }
 
     #[test]
@@ -2091,8 +2309,12 @@ mod tests {
     fn json_encode_decode_roundtrip() {
         let t = make_table();
         t.borrow_mut().rawset(LuaKey::Integer(1), int(1)).unwrap();
-        t.borrow_mut().rawset(LuaKey::Integer(2), s("hello")).unwrap();
-        t.borrow_mut().rawset(LuaKey::Integer(3), LuaValue::Nil).unwrap();
+        t.borrow_mut()
+            .rawset(LuaKey::Integer(2), s("hello"))
+            .unwrap();
+        t.borrow_mut()
+            .rawset(LuaKey::Integer(3), LuaValue::Nil)
+            .unwrap();
 
         let encoded = dispatch(BuiltinId::JsonEncode, vec![tval(Rc::clone(&t))]).unwrap();
         let decoded = dispatch(BuiltinId::JsonDecode, encoded).unwrap();
@@ -2135,7 +2357,10 @@ mod tests {
         // 33 nested arrays should hit the depth limit.
         let json = format!("{}1{}", "[".repeat(33), "]".repeat(33));
         let err = dispatch(BuiltinId::JsonDecode, vec![s(&json)]).unwrap_err();
-        assert!(matches!(err, VmError::RuntimeError(_)), "expected RuntimeError for depth-33, got {err:?}");
+        assert!(
+            matches!(err, VmError::RuntimeError(_)),
+            "expected RuntimeError for depth-33, got {err:?}"
+        );
     }
 
     // ── json.decode memory accounting ────────────────────────────────────────
@@ -2150,19 +2375,34 @@ mod tests {
         // With a very tight memory budget, decoding should fail.
         let mut tiny_mem = MemoryMeter::new(50);
         let mut g = gas();
-        let result = call_builtin(BuiltinId::JsonDecode, &[input.clone()], &mut g, &mut tiny_mem, &mut logs());
-        assert!(matches!(result, Err(VmError::MemoryExhausted)), "expected MemoryExhausted with tiny budget");
+        let result = call_builtin(
+            BuiltinId::JsonDecode,
+            &[input.clone()],
+            &mut g,
+            &mut tiny_mem,
+            &mut logs(),
+        );
+        assert!(
+            matches!(result, Err(VmError::MemoryExhausted)),
+            "expected MemoryExhausted with tiny budget"
+        );
 
         // With the default budget it must succeed.
         let result = dispatch(BuiltinId::JsonDecode, vec![input]);
-        assert!(result.is_ok(), "expected success with default memory budget");
+        assert!(
+            result.is_ok(),
+            "expected success with default memory budget"
+        );
     }
 
     // ── json.encode edge cases ────────────────────────────────────────────────
 
     #[test]
     fn json_encode_negative_integer() {
-        assert_eq!(dispatch(BuiltinId::JsonEncode, vec![int(-42)]).unwrap(), vec![s("-42")]);
+        assert_eq!(
+            dispatch(BuiltinId::JsonEncode, vec![int(-42)]).unwrap(),
+            vec![s("-42")]
+        );
     }
 
     #[test]
@@ -2182,7 +2422,10 @@ mod tests {
     #[test]
     fn json_encode_empty_table_is_object() {
         let t = make_table();
-        assert_eq!(dispatch(BuiltinId::JsonEncode, vec![tval(t)]).unwrap(), vec![s("{}")]);
+        assert_eq!(
+            dispatch(BuiltinId::JsonEncode, vec![tval(t)]).unwrap(),
+            vec![s("{}")]
+        );
     }
 
     #[test]
@@ -2205,14 +2448,32 @@ mod tests {
     #[test]
     fn json_encode_nested_array() {
         let inner1 = make_table();
-        inner1.borrow_mut().rawset(LuaKey::Integer(1), int(1)).unwrap();
-        inner1.borrow_mut().rawset(LuaKey::Integer(2), int(2)).unwrap();
+        inner1
+            .borrow_mut()
+            .rawset(LuaKey::Integer(1), int(1))
+            .unwrap();
+        inner1
+            .borrow_mut()
+            .rawset(LuaKey::Integer(2), int(2))
+            .unwrap();
         let inner2 = make_table();
-        inner2.borrow_mut().rawset(LuaKey::Integer(1), int(3)).unwrap();
-        inner2.borrow_mut().rawset(LuaKey::Integer(2), int(4)).unwrap();
+        inner2
+            .borrow_mut()
+            .rawset(LuaKey::Integer(1), int(3))
+            .unwrap();
+        inner2
+            .borrow_mut()
+            .rawset(LuaKey::Integer(2), int(4))
+            .unwrap();
         let outer = make_table();
-        outer.borrow_mut().rawset(LuaKey::Integer(1), tval(inner1)).unwrap();
-        outer.borrow_mut().rawset(LuaKey::Integer(2), tval(inner2)).unwrap();
+        outer
+            .borrow_mut()
+            .rawset(LuaKey::Integer(1), tval(inner1))
+            .unwrap();
+        outer
+            .borrow_mut()
+            .rawset(LuaKey::Integer(2), tval(inner2))
+            .unwrap();
         assert_eq!(
             dispatch(BuiltinId::JsonEncode, vec![tval(outer)]).unwrap(),
             vec![s("[[1,2],[3,4]]")]
@@ -2222,9 +2483,11 @@ mod tests {
     #[test]
     fn json_encode_unicode_escape() {
         // Byte 0x01 (control character) must be encoded as \u0001.
-        let result = dispatch(BuiltinId::JsonEncode, vec![
-            LuaValue::String(LuaString::from_bytes(&[0x01]))
-        ]).unwrap();
+        let result = dispatch(
+            BuiltinId::JsonEncode,
+            vec![LuaValue::String(LuaString::from_bytes(&[0x01]))],
+        )
+        .unwrap();
         assert_eq!(result.len(), 1);
         if let LuaValue::String(encoded) = &result[0] {
             let s = core::str::from_utf8(encoded.as_bytes()).unwrap();
@@ -2237,7 +2500,10 @@ mod tests {
     #[test]
     fn json_encode_closure_error() {
         use crate::types::value::LuaClosure;
-        let closure = LuaValue::Function(LuaClosure { proto_idx: 0, upvalues: vec![] });
+        let closure = LuaValue::Function(LuaClosure {
+            proto_idx: 0,
+            upvalues: vec![],
+        });
         let err = dispatch(BuiltinId::JsonEncode, vec![closure]).unwrap_err();
         assert!(matches!(err, VmError::RuntimeError(_)));
     }
@@ -2288,12 +2554,18 @@ mod tests {
 
     #[test]
     fn json_decode_integer_zero() {
-        assert_eq!(dispatch(BuiltinId::JsonDecode, vec![s("0")]).unwrap(), vec![int(0)]);
+        assert_eq!(
+            dispatch(BuiltinId::JsonDecode, vec![s("0")]).unwrap(),
+            vec![int(0)]
+        );
     }
 
     #[test]
     fn json_decode_integer_negative() {
-        assert_eq!(dispatch(BuiltinId::JsonDecode, vec![s("-99")]).unwrap(), vec![int(-99)]);
+        assert_eq!(
+            dispatch(BuiltinId::JsonDecode, vec![s("-99")]).unwrap(),
+            vec![int(-99)]
+        );
     }
 
     #[test]
