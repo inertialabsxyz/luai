@@ -1,0 +1,20 @@
+[package]
+name = "luai-openvm"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+luai = { path = "..", default-features = false, features = ["zkvm", "serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+luai_prover = { path = "../prover" }
+openvm = { git = "https://github.com/openvm-org/openvm.git", tag = "v1.4.1", features = ["std"] }
+hex = "0.4.3"
+
+[[bin]]
+name = "luai-openvm"
+path = "src/main.rs"
+
+[[bin]]
+name = "luai-openvm-encoder"
+path = "src/encoder.rs"
