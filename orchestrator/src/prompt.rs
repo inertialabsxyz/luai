@@ -33,12 +33,46 @@ pub fn build_system_prompt(tool_descriptions: &[ToolDescription]) -> String {
     prompt
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ToolDescription {
     pub name: String,
     pub description: String,
+    #[serde(default)]
     pub args: Vec<(String, String)>,
+    #[serde(default)]
     pub returns: Vec<(String, String)>,
+}
+
+/// A named collection of tool descriptions that can be loaded from JSON.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ToolCatalogue {
+    pub tools: Vec<ToolDescription>,
+}
+
+impl ToolCatalogue {
+    pub fn new(tools: Vec<ToolDescription>) -> Self {
+        ToolCatalogue { tools }
+    }
+
+    /// Load a catalogue from a JSON string.
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(json)
+    }
+
+    /// Serialize the catalogue to a JSON string.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+
+    /// Build a system prompt from this catalogue.
+    pub fn build_prompt(&self) -> String {
+        build_system_prompt(&self.tools)
+    }
+
+    /// List the tool names in this catalogue.
+    pub fn tool_names(&self) -> Vec<&str> {
+        self.tools.iter().map(|t| t.name.as_str()).collect()
+    }
 }
 
 const SYSTEM_PREAMBLE: &str = r#"You are a Lua program generator. You write Lua programs that execute in a sandboxed, deterministic VM.
@@ -97,7 +131,8 @@ mod tests {
         let prompt = build_system_prompt(&tools);
         assert!(prompt.contains("### `echo`"));
         assert!(prompt.contains("Echoes the message back"));
-        assert!(prompt.contains("string to echo"));
+        assert!(prompt.contains("- `message` — string to echo"));
+        assert!(prompt.contains("- `message` — the echoed string"));
     }
 
     #[test]
@@ -105,5 +140,152 @@ mod tests {
         let prompt = build_system_prompt(&[]);
         assert!(!prompt.contains("## Available tools"));
         assert!(prompt.contains("You are a Lua program generator"));
+        assert!(prompt.contains("## Output format"));
+    }
+
+    #[test]
+    fn prompt_multiple_tools() {
+        let tools = vec![
+            ToolDescription {
+                name: "echo".into(),
+                description: "Echo".into(),
+                args: vec![("msg".into(), "string".into())],
+                returns: vec![],
+            },
+            ToolDescription {
+                name: "add".into(),
+                description: "Add".into(),
+                args: vec![],
+                returns: vec![("result".into(), "integer".into())],
+            },
+        ];
+        let prompt = build_system_prompt(&tools);
+        assert!(prompt.contains("### `echo`"));
+        assert!(prompt.contains("### `add`"));
+        // echo has args but no returns section
+        assert!(prompt.contains("- `msg` — string"));
+        // add has returns but no args section
+        assert!(prompt.contains("- `result` — integer"));
+    }
+
+    #[test]
+    fn prompt_tool_no_args_no_returns() {
+        let tools = vec![ToolDescription {
+            name: "noop".into(),
+            description: "Does nothing".into(),
+            args: vec![],
+            returns: vec![],
+        }];
+        let prompt = build_system_prompt(&tools);
+        assert!(prompt.contains("### `noop`"));
+        assert!(prompt.contains("Does nothing"));
+        // No **Args:** or **Returns:** sections
+        let noop_section = prompt.split("### `noop`").nth(1).unwrap();
+        let section_end = noop_section.find("## Output format").unwrap_or(noop_section.len());
+        let section = &noop_section[..section_end];
+        assert!(!section.contains("**Args:**"));
+        assert!(!section.contains("**Returns:**"));
+    }
+
+    #[test]
+    fn prompt_contains_language_reference() {
+        let prompt = build_system_prompt(&[]);
+        assert!(prompt.contains("## Language subset"));
+        assert!(prompt.contains("No floats"));
+        assert!(prompt.contains("## Standard library"));
+        assert!(prompt.contains("string.len"));
+        assert!(prompt.contains("json.encode"));
+        assert!(prompt.contains("## Tool calls"));
+        assert!(prompt.contains("tool.call"));
+        assert!(prompt.contains("## Important constraints"));
+        assert!(prompt.contains("## Output format"));
+        assert!(prompt.contains("Respond with ONLY the Lua program"));
+    }
+
+    // ── ToolCatalogue tests ──────────────────────────────────────────
+
+    #[test]
+    fn catalogue_roundtrip_json() {
+        let cat = ToolCatalogue::new(vec![
+            ToolDescription {
+                name: "echo".into(),
+                description: "Echo back".into(),
+                args: vec![("message".into(), "string".into())],
+                returns: vec![("message".into(), "string".into())],
+            },
+            ToolDescription {
+                name: "add".into(),
+                description: "Add two integers".into(),
+                args: vec![
+                    ("a".into(), "integer".into()),
+                    ("b".into(), "integer".into()),
+                ],
+                returns: vec![("result".into(), "integer".into())],
+            },
+        ]);
+
+        let json = cat.to_json().unwrap();
+        let restored = ToolCatalogue::from_json(&json).unwrap();
+
+        assert_eq!(restored.tools.len(), 2);
+        assert_eq!(restored.tools[0].name, "echo");
+        assert_eq!(restored.tools[1].name, "add");
+        assert_eq!(restored.tools[1].args.len(), 2);
+    }
+
+    #[test]
+    fn catalogue_from_json_minimal() {
+        let json = r#"{"tools": [{"name": "ping", "description": "Ping"}]}"#;
+        let cat = ToolCatalogue::from_json(json).unwrap();
+        assert_eq!(cat.tools.len(), 1);
+        assert_eq!(cat.tools[0].name, "ping");
+        assert!(cat.tools[0].args.is_empty());
+        assert!(cat.tools[0].returns.is_empty());
+    }
+
+    #[test]
+    fn catalogue_from_json_invalid() {
+        let result = ToolCatalogue::from_json("not json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn catalogue_tool_names() {
+        let cat = ToolCatalogue::new(vec![
+            ToolDescription {
+                name: "a".into(),
+                description: "".into(),
+                args: vec![],
+                returns: vec![],
+            },
+            ToolDescription {
+                name: "b".into(),
+                description: "".into(),
+                args: vec![],
+                returns: vec![],
+            },
+        ]);
+        assert_eq!(cat.tool_names(), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn catalogue_build_prompt() {
+        let cat = ToolCatalogue::new(vec![ToolDescription {
+            name: "test_tool".into(),
+            description: "A test tool".into(),
+            args: vec![("x".into(), "integer".into())],
+            returns: vec![],
+        }]);
+        let prompt = cat.build_prompt();
+        assert!(prompt.contains("### `test_tool`"));
+        assert!(prompt.contains("A test tool"));
+    }
+
+    #[test]
+    fn catalogue_empty() {
+        let cat = ToolCatalogue::new(vec![]);
+        assert!(cat.tool_names().is_empty());
+        let prompt = cat.build_prompt();
+        assert!(!prompt.contains("## Available tools"));
     }
 }

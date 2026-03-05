@@ -146,3 +146,243 @@ pub fn format_output(result: &PipelineResult) -> String {
 
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::StubHost;
+
+    // ── compile_and_verify ───────────────────────────────────────────
+
+    #[test]
+    fn compile_valid_program() {
+        let program = compile_and_verify("return 42").unwrap();
+        assert!(!program.prototypes.is_empty());
+    }
+
+    #[test]
+    fn compile_with_tool_call() {
+        let source = r#"local r = tool.call("echo", {message = "hi"})
+return r.message"#;
+        let program = compile_and_verify(source).unwrap();
+        assert!(!program.prototypes.is_empty());
+    }
+
+    #[test]
+    fn compile_parse_error() {
+        let err = compile_and_verify("if then end end").unwrap_err();
+        assert!(matches!(err, PipelineError::Parse(_)));
+        assert!(err.to_string().contains("Parse error"));
+    }
+
+    #[test]
+    fn compile_disallowed_identifier() {
+        let err = compile_and_verify("local x = require('foo')").unwrap_err();
+        assert!(matches!(err, PipelineError::Parse(_)));
+    }
+
+    #[test]
+    fn compile_empty_source() {
+        // Empty source is valid Lua — returns nil
+        let program = compile_and_verify("").unwrap();
+        assert!(!program.prototypes.is_empty());
+    }
+
+    // ── execute ──────────────────────────────────────────────────────
+
+    #[test]
+    fn execute_simple_return() {
+        let program = compile_and_verify("return 42").unwrap();
+        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        assert_eq!(output.return_value, LuaValue::Integer(42));
+    }
+
+    #[test]
+    fn execute_with_logs() {
+        let program = compile_and_verify(r#"log("hello")
+log("world")
+return 0"#)
+            .unwrap();
+        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        assert_eq!(output.logs, vec!["hello", "world"]);
+    }
+
+    #[test]
+    fn execute_tool_call_echo() {
+        let source = r#"local r = tool.call("echo", {message = "test"})
+return r.message"#;
+        let program = compile_and_verify(source).unwrap();
+        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        assert_eq!(
+            output.return_value,
+            LuaValue::String(luai::types::value::LuaString::from_str("test"))
+        );
+        assert_eq!(output.transcript.len(), 1);
+        assert_eq!(output.transcript[0].tool_name, "echo");
+    }
+
+    #[test]
+    fn execute_tool_call_add() {
+        let source = r#"local r = tool.call("add", {a = 10, b = 32})
+return r.result"#;
+        let program = compile_and_verify(source).unwrap();
+        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        assert_eq!(output.return_value, LuaValue::Integer(42));
+    }
+
+    #[test]
+    fn execute_tool_call_upper() {
+        let source = r#"local r = tool.call("upper", {text = "hello"})
+return r.result"#;
+        let program = compile_and_verify(source).unwrap();
+        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        assert_eq!(
+            output.return_value,
+            LuaValue::String(luai::types::value::LuaString::from_str("HELLO"))
+        );
+    }
+
+    #[test]
+    fn execute_tool_call_time_now() {
+        let source = r#"local r = tool.call("time_now", {})
+return r.timestamp"#;
+        let program = compile_and_verify(source).unwrap();
+        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        assert_eq!(output.return_value, LuaValue::Integer(1709654400));
+    }
+
+    #[test]
+    fn execute_unknown_tool_error() {
+        let source = r#"tool.call("nonexistent", {})"#;
+        let program = compile_and_verify(source).unwrap();
+        let err = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap_err();
+        assert!(matches!(err, PipelineError::Runtime(_, _)));
+        assert!(err.to_string().contains("Tool error"));
+    }
+
+    #[test]
+    fn execute_gas_exhaustion() {
+        let source = "while true do end";
+        let program = compile_and_verify(source).unwrap();
+        let mut config = VmConfig::default();
+        config.gas_limit = 100;
+        let err = execute(&program, LuaValue::Nil, config, StubHost).unwrap_err();
+        assert!(err.to_string().contains("Gas limit exceeded"));
+    }
+
+    #[test]
+    fn execute_multiple_tool_calls() {
+        let source = r#"
+local r1 = tool.call("add", {a = 1, b = 2})
+local r2 = tool.call("add", {a = 3, b = 4})
+return r1.result + r2.result
+"#;
+        let program = compile_and_verify(source).unwrap();
+        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        assert_eq!(output.return_value, LuaValue::Integer(10));
+        assert_eq!(output.transcript.len(), 2);
+    }
+
+    // ── format_vm_error ──────────────────────────────────────────────
+
+    #[test]
+    fn format_error_gas() {
+        let msg = format_vm_error(&VmError::GasExhausted);
+        assert!(msg.contains("Gas limit exceeded"));
+    }
+
+    #[test]
+    fn format_error_memory() {
+        let msg = format_vm_error(&VmError::MemoryExhausted);
+        assert!(msg.contains("Memory limit exceeded"));
+    }
+
+    #[test]
+    fn format_error_depth() {
+        let msg = format_vm_error(&VmError::CallDepthExceeded);
+        assert!(msg.contains("Call depth exceeded"));
+    }
+
+    #[test]
+    fn format_error_type() {
+        let msg = format_vm_error(&VmError::TypeError("bad type".into()));
+        assert!(msg.contains("Type error: bad type"));
+    }
+
+    #[test]
+    fn format_error_tool() {
+        let msg = format_vm_error(&VmError::ToolError("tool broke".into()));
+        assert!(msg.contains("Tool error: tool broke"));
+    }
+
+    #[test]
+    fn format_error_output() {
+        let msg = format_vm_error(&VmError::OutputExceeded);
+        assert!(msg.contains("Output size exceeded"));
+    }
+
+    #[test]
+    fn format_error_with_line() {
+        let inner = VmError::TypeError("oops".into());
+        let msg = format_vm_error(&VmError::WithLine(42, Box::new(inner)));
+        assert!(msg.contains("line 42"));
+        assert!(msg.contains("Type error: oops"));
+    }
+
+    // ── format_error_for_retry ───────────────────────────────────────
+
+    #[test]
+    fn retry_context_includes_source_and_error() {
+        let err = PipelineError::Parse("unexpected token".into());
+        let ctx = format_error_for_retry("return ???", &err);
+        assert!(ctx.contains("return ???"));
+        assert!(ctx.contains("Parse error"));
+        assert!(ctx.contains("unexpected token"));
+        assert!(ctx.contains("Please fix the program"));
+    }
+
+    // ── format_output ────────────────────────────────────────────────
+
+    #[test]
+    fn format_output_simple() {
+        let program = compile_and_verify("return 42").unwrap();
+        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let result = PipelineResult {
+            source: "return 42".into(),
+            output,
+            attempts: 1,
+        };
+        let formatted = format_output(&result);
+        assert!(formatted.contains("luai execution report"));
+        assert!(formatted.contains("Attempts: 1"));
+        assert!(formatted.contains("return 42"));
+        assert!(formatted.contains("42")); // return value
+        assert!(formatted.contains("Gas:"));
+        assert!(formatted.contains("Memory:"));
+        assert!(formatted.contains("Tools:  0 call(s)"));
+        // No logs or transcript sections for this simple program
+        assert!(!formatted.contains("── Logs"));
+        assert!(!formatted.contains("── Transcript"));
+    }
+
+    #[test]
+    fn format_output_with_logs_and_transcript() {
+        let source = r#"log("debug info")
+local r = tool.call("echo", {message = "hi"})
+return 0"#;
+        let program = compile_and_verify(source).unwrap();
+        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let result = PipelineResult {
+            source: source.into(),
+            output,
+            attempts: 2,
+        };
+        let formatted = format_output(&result);
+        assert!(formatted.contains("Attempts: 2"));
+        assert!(formatted.contains("── Logs"));
+        assert!(formatted.contains("debug info"));
+        assert!(formatted.contains("── Transcript"));
+        assert!(formatted.contains("echo"));
+        assert!(formatted.contains("Tools:  1 call(s)"));
+    }
+}

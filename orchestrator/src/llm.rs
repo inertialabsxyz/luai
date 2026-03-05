@@ -133,6 +133,8 @@ pub fn strip_code_fences(raw: &str) -> String {
 mod tests {
     use super::*;
 
+    // ── strip_code_fences ────────────────────────────────────────────
+
     #[test]
     fn strip_bare_code() {
         let input = "return 42";
@@ -155,5 +157,85 @@ mod tests {
     fn strip_with_whitespace() {
         let input = "  ```lua\n  local x = 1\n  return x\n  ```  ";
         assert_eq!(strip_code_fences(input), "local x = 1\n  return x");
+    }
+
+    #[test]
+    fn strip_multiline_program() {
+        let input = "```lua\nlocal a = 1\nlocal b = 2\nreturn a + b\n```";
+        assert_eq!(
+            strip_code_fences(input),
+            "local a = 1\nlocal b = 2\nreturn a + b"
+        );
+    }
+
+    #[test]
+    fn strip_fence_with_trailing_newline() {
+        let input = "```lua\nreturn 42\n```\n";
+        // After trim, trailing newline is gone, so suffix match works
+        assert_eq!(strip_code_fences(input), "return 42");
+    }
+
+    #[test]
+    fn strip_only_opening_fence_passthrough() {
+        // No closing fence — should pass through as-is (trimmed)
+        let input = "```lua\nreturn 42";
+        assert_eq!(strip_code_fences(input), "```lua\nreturn 42");
+    }
+
+    #[test]
+    fn strip_empty_fenced_block() {
+        let input = "```lua\n```";
+        assert_eq!(strip_code_fences(input), "");
+    }
+
+    #[test]
+    fn strip_empty_string() {
+        assert_eq!(strip_code_fences(""), "");
+    }
+
+    #[test]
+    fn strip_whitespace_only() {
+        assert_eq!(strip_code_fences("   \n  \n  "), "");
+    }
+
+    #[test]
+    fn strip_no_fence_multiline() {
+        let input = "local x = 1\nreturn x";
+        assert_eq!(strip_code_fences(input), "local x = 1\nreturn x");
+    }
+
+    // ── Message serialization ────────────────────────────────────────
+
+    #[test]
+    fn message_serialize() {
+        let msg = Message {
+            role: "user".into(),
+            content: "hello".into(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"role\":\"user\""));
+        assert!(json.contains("\"content\":\"hello\""));
+    }
+
+    #[test]
+    fn message_deserialize() {
+        let json = r#"{"role":"assistant","content":"return 42"}"#;
+        let msg: Message = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.role, "assistant");
+        assert_eq!(msg.content, "return 42");
+    }
+
+    // ── LlmError display ────────────────────────────────────────────
+
+    #[test]
+    fn llm_error_display_api() {
+        let err = LlmError::Api("bad request".into());
+        assert_eq!(format!("{err}"), "API error: bad request");
+    }
+
+    #[test]
+    fn llm_error_display_no_content() {
+        let err = LlmError::NoContent;
+        assert_eq!(format!("{err}"), "empty response from API");
     }
 }

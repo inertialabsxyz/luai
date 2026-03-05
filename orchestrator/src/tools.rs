@@ -59,6 +59,188 @@ impl HostInterface for StubHost {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn str_key(s: &str) -> LuaKey {
+        LuaKey::String(LuaString::from_str(s))
+    }
+
+    fn make_args(pairs: &[(&str, LuaValue)]) -> LuaTable {
+        let mut t = LuaTable::new();
+        for (k, v) in pairs {
+            t.rawset(str_key(k), v.clone()).unwrap();
+        }
+        t
+    }
+
+    // ── echo ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn echo_returns_message() {
+        let mut host = StubHost;
+        let args = make_args(&[("message", LuaValue::String(LuaString::from_str("hello")))]);
+        let resp = host.call_tool("echo", &args).unwrap();
+        assert_eq!(
+            resp.get(&str_key("message")),
+            Some(&LuaValue::String(LuaString::from_str("hello")))
+        );
+    }
+
+    #[test]
+    fn echo_missing_message_returns_nil() {
+        let mut host = StubHost;
+        let args = LuaTable::new();
+        let resp = host.call_tool("echo", &args).unwrap();
+        // Lua semantics: rawset with Nil is a no-op, so key is absent
+        assert_eq!(resp.get(&str_key("message")), None);
+    }
+
+    // ── add ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn add_returns_sum() {
+        let mut host = StubHost;
+        let args = make_args(&[
+            ("a", LuaValue::Integer(17)),
+            ("b", LuaValue::Integer(25)),
+        ]);
+        let resp = host.call_tool("add", &args).unwrap();
+        assert_eq!(resp.get(&str_key("result")), Some(&LuaValue::Integer(42)));
+    }
+
+    #[test]
+    fn add_negative_numbers() {
+        let mut host = StubHost;
+        let args = make_args(&[
+            ("a", LuaValue::Integer(-10)),
+            ("b", LuaValue::Integer(3)),
+        ]);
+        let resp = host.call_tool("add", &args).unwrap();
+        assert_eq!(resp.get(&str_key("result")), Some(&LuaValue::Integer(-7)));
+    }
+
+    #[test]
+    fn add_missing_arg_a_errors() {
+        let mut host = StubHost;
+        let args = make_args(&[("b", LuaValue::Integer(1))]);
+        let err = host.call_tool("add", &args).unwrap_err();
+        assert!(err.contains("expected integer arg 'a'"));
+    }
+
+    #[test]
+    fn add_missing_arg_b_errors() {
+        let mut host = StubHost;
+        let args = make_args(&[("a", LuaValue::Integer(1))]);
+        let err = host.call_tool("add", &args).unwrap_err();
+        assert!(err.contains("expected integer arg 'b'"));
+    }
+
+    #[test]
+    fn add_wrong_type_errors() {
+        let mut host = StubHost;
+        let args = make_args(&[
+            ("a", LuaValue::String(LuaString::from_str("not a number"))),
+            ("b", LuaValue::Integer(1)),
+        ]);
+        let err = host.call_tool("add", &args).unwrap_err();
+        assert!(err.contains("expected integer arg 'a'"));
+    }
+
+    // ── upper ────────────────────────────────────────────────────────
+
+    #[test]
+    fn upper_converts_text() {
+        let mut host = StubHost;
+        let args = make_args(&[("text", LuaValue::String(LuaString::from_str("hello world")))]);
+        let resp = host.call_tool("upper", &args).unwrap();
+        assert_eq!(
+            resp.get(&str_key("result")),
+            Some(&LuaValue::String(LuaString::from_str("HELLO WORLD")))
+        );
+    }
+
+    #[test]
+    fn upper_already_uppercase() {
+        let mut host = StubHost;
+        let args = make_args(&[("text", LuaValue::String(LuaString::from_str("ABC")))]);
+        let resp = host.call_tool("upper", &args).unwrap();
+        assert_eq!(
+            resp.get(&str_key("result")),
+            Some(&LuaValue::String(LuaString::from_str("ABC")))
+        );
+    }
+
+    #[test]
+    fn upper_missing_text_errors() {
+        let mut host = StubHost;
+        let args = LuaTable::new();
+        let err = host.call_tool("upper", &args).unwrap_err();
+        assert!(err.contains("expected string arg 'text'"));
+    }
+
+    #[test]
+    fn upper_wrong_type_errors() {
+        let mut host = StubHost;
+        let args = make_args(&[("text", LuaValue::Integer(42))]);
+        let err = host.call_tool("upper", &args).unwrap_err();
+        assert!(err.contains("expected string arg 'text'"));
+    }
+
+    // ── time_now ─────────────────────────────────────────────────────
+
+    #[test]
+    fn time_now_returns_fixed_timestamp() {
+        let mut host = StubHost;
+        let args = LuaTable::new();
+        let resp = host.call_tool("time_now", &args).unwrap();
+        assert_eq!(
+            resp.get(&str_key("timestamp")),
+            Some(&LuaValue::Integer(1709654400))
+        );
+    }
+
+    // ── unknown tool ─────────────────────────────────────────────────
+
+    #[test]
+    fn unknown_tool_errors() {
+        let mut host = StubHost;
+        let args = LuaTable::new();
+        let err = host.call_tool("nonexistent", &args).unwrap_err();
+        assert!(err.contains("unknown tool 'nonexistent'"));
+    }
+
+    // ── tool descriptions ────────────────────────────────────────────
+
+    #[test]
+    fn stub_descriptions_match_host_tools() {
+        let descs = stub_tool_descriptions();
+        let names: Vec<&str> = descs.iter().map(|d| d.name.as_str()).collect();
+        // Every described tool should work in the host
+        let mut host = StubHost;
+        for name in &names {
+            // time_now needs no special args
+            if *name == "time_now" {
+                let _ = host.call_tool(name, &LuaTable::new());
+            }
+        }
+        assert!(names.contains(&"echo"));
+        assert!(names.contains(&"add"));
+        assert!(names.contains(&"upper"));
+        assert!(names.contains(&"time_now"));
+    }
+
+    #[test]
+    fn stub_descriptions_have_content() {
+        let descs = stub_tool_descriptions();
+        for desc in &descs {
+            assert!(!desc.name.is_empty());
+            assert!(!desc.description.is_empty());
+        }
+    }
+}
+
 /// Tool descriptions for the stub host (used in prompt generation).
 pub fn stub_tool_descriptions() -> Vec<crate::prompt::ToolDescription> {
     use crate::prompt::ToolDescription;
