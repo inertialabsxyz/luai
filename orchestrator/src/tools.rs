@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use luai::{
     types::{
         table::{LuaKey, LuaTable},
@@ -6,13 +9,37 @@ use luai::{
     vm::engine::HostInterface,
 };
 
-/// A stub host with basic tools for initial testing.
-/// This will be replaced by a full LiveHost with real HTTP, KV, and LLM tools.
+use crate::llm::LlmClient;
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+fn str_key(s: &str) -> LuaKey {
+    LuaKey::String(LuaString::from_str(s))
+}
+
+fn get_str(args: &LuaTable, key: &str) -> Result<String, String> {
+    match args.get(&str_key(key)) {
+        Some(LuaValue::String(s)) => Ok(String::from_utf8_lossy(s.as_bytes()).to_string()),
+        Some(_) => Err(format!("expected string arg '{key}'")),
+        None => Err(format!("missing required arg '{key}'")),
+    }
+}
+
+fn get_opt_str(args: &LuaTable, key: &str) -> Option<String> {
+    match args.get(&str_key(key)) {
+        Some(LuaValue::String(s)) => Some(String::from_utf8_lossy(s.as_bytes()).to_string()),
+        _ => None,
+    }
+}
+
+// ── StubHost (kept for testing) ──────────────────────────────────────────────
+
+#[cfg(test)]
 pub struct StubHost;
 
+#[cfg(test)]
 impl HostInterface for StubHost {
     fn call_tool(&mut self, name: &str, args: &LuaTable) -> Result<LuaTable, String> {
-        let str_key = |s: &str| LuaKey::String(LuaString::from_str(s));
         let mut resp = LuaTable::new();
 
         match name {
@@ -49,7 +76,6 @@ impl HostInterface for StubHost {
                 .unwrap();
             }
             "time_now" => {
-                // Deterministic stub: always returns a fixed timestamp
                 resp.rawset(str_key("timestamp"), LuaValue::Integer(1709654400))
                     .unwrap();
             }
@@ -59,13 +85,236 @@ impl HostInterface for StubHost {
     }
 }
 
+// ── LiveHost ─────────────────────────────────────────────────────────────────
+
+/// Maximum response body size for HTTP tools (1 MB).
+const MAX_HTTP_BODY: usize = 1024 * 1024;
+/// HTTP request timeout in seconds.
+const HTTP_TIMEOUT_SECS: u64 = 30;
+
+pub struct LiveHost {
+    http: reqwest::blocking::Client,
+    kv: HashMap<String, String>,
+    llm: LlmClient,
+}
+
+impl LiveHost {
+    pub fn new(llm: LlmClient) -> Self {
+        let http = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
+            .build()
+            .expect("failed to build HTTP client");
+        LiveHost {
+            http,
+            kv: HashMap::new(),
+            llm,
+        }
+    }
+
+    fn tool_http_get(&self, args: &LuaTable) -> Result<LuaTable, String> {
+        let url = get_str(args, "url")?;
+        let resp = self
+            .http
+            .get(&url)
+            .send()
+            .map_err(|e| format!("http_get failed: {e}"))?;
+        let status = resp.status().as_u16() as i64;
+        let body = resp
+            .text()
+            .map_err(|e| format!("http_get: failed to read body: {e}"))?;
+        let body = if body.len() > MAX_HTTP_BODY {
+            body[..MAX_HTTP_BODY].to_string()
+        } else {
+            body
+        };
+
+        let mut resp_table = LuaTable::new();
+        resp_table
+            .rawset(str_key("status"), LuaValue::Integer(status))
+            .unwrap();
+        resp_table
+            .rawset(
+                str_key("body"),
+                LuaValue::String(LuaString::from_str(&body)),
+            )
+            .unwrap();
+        Ok(resp_table)
+    }
+
+    fn tool_http_post(&self, args: &LuaTable) -> Result<LuaTable, String> {
+        let url = get_str(args, "url")?;
+        let body = get_str(args, "body")?;
+        let resp = self
+            .http
+            .post(&url)
+            .header("content-type", "application/json")
+            .body(body)
+            .send()
+            .map_err(|e| format!("http_post failed: {e}"))?;
+        let status = resp.status().as_u16() as i64;
+        let resp_body = resp
+            .text()
+            .map_err(|e| format!("http_post: failed to read body: {e}"))?;
+        let resp_body = if resp_body.len() > MAX_HTTP_BODY {
+            resp_body[..MAX_HTTP_BODY].to_string()
+        } else {
+            resp_body
+        };
+
+        let mut resp_table = LuaTable::new();
+        resp_table
+            .rawset(str_key("status"), LuaValue::Integer(status))
+            .unwrap();
+        resp_table
+            .rawset(
+                str_key("body"),
+                LuaValue::String(LuaString::from_str(&resp_body)),
+            )
+            .unwrap();
+        Ok(resp_table)
+    }
+
+    fn tool_kv_get(&self, args: &LuaTable) -> Result<LuaTable, String> {
+        let key = get_str(args, "key")?;
+        let mut resp = LuaTable::new();
+        match self.kv.get(&key) {
+            Some(val) => {
+                resp.rawset(
+                    str_key("value"),
+                    LuaValue::String(LuaString::from_str(val)),
+                )
+                .unwrap();
+            }
+            None => {
+                resp.rawset(str_key("value"), LuaValue::Nil).unwrap();
+            }
+        }
+        Ok(resp)
+    }
+
+    fn tool_kv_set(&mut self, args: &LuaTable) -> Result<LuaTable, String> {
+        let key = get_str(args, "key")?;
+        let value = get_str(args, "value")?;
+        self.kv.insert(key, value);
+        Ok(LuaTable::new())
+    }
+
+    fn tool_llm_query(&self, args: &LuaTable) -> Result<LuaTable, String> {
+        let prompt = get_str(args, "prompt")?;
+        let context = get_opt_str(args, "context").unwrap_or_default();
+
+        let user_content = if context.is_empty() {
+            prompt
+        } else {
+            format!("{prompt}\n\nContext:\n{context}")
+        };
+
+        let messages = vec![crate::llm::Message {
+            role: "user".into(),
+            content: user_content,
+        }];
+
+        let response = self
+            .llm
+            .generate("You are a helpful assistant. Be concise.", &messages)
+            .map_err(|e| format!("llm_query failed: {e}"))?;
+
+        let mut resp = LuaTable::new();
+        resp.rawset(
+            str_key("response"),
+            LuaValue::String(LuaString::from_str(&response)),
+        )
+        .unwrap();
+        Ok(resp)
+    }
+
+    fn tool_time_now(&self) -> Result<LuaTable, String> {
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| format!("time_now: {e}"))?
+            .as_secs() as i64;
+        let mut resp = LuaTable::new();
+        resp.rawset(str_key("timestamp"), LuaValue::Integer(ts))
+            .unwrap();
+        Ok(resp)
+    }
+}
+
+impl HostInterface for LiveHost {
+    fn call_tool(&mut self, name: &str, args: &LuaTable) -> Result<LuaTable, String> {
+        match name {
+            "http_get" => self.tool_http_get(args),
+            "http_post" => self.tool_http_post(args),
+            "kv_get" => self.tool_kv_get(args),
+            "kv_set" => self.tool_kv_set(args),
+            "llm_query" => self.tool_llm_query(args),
+            "time_now" => self.tool_time_now(),
+            other => Err(format!("unknown tool '{other}'")),
+        }
+    }
+}
+
+/// Tool descriptions for the live host (used in prompt generation).
+pub fn live_tool_descriptions() -> Vec<crate::prompt::ToolDescription> {
+    use crate::prompt::ToolDescription;
+    vec![
+        ToolDescription {
+            name: "http_get".into(),
+            description: "Fetch a URL via HTTP GET. Returns the status code and response body as a string.".into(),
+            args: vec![("url".into(), "string — the URL to fetch".into())],
+            returns: vec![
+                ("status".into(), "integer — HTTP status code (e.g. 200)".into()),
+                ("body".into(), "string — the response body".into()),
+            ],
+        },
+        ToolDescription {
+            name: "http_post".into(),
+            description: "Send a POST request with a JSON body. Returns the status code and response body.".into(),
+            args: vec![
+                ("url".into(), "string — the URL to post to".into()),
+                ("body".into(), "string — the JSON request body".into()),
+            ],
+            returns: vec![
+                ("status".into(), "integer — HTTP status code".into()),
+                ("body".into(), "string — the response body".into()),
+            ],
+        },
+        ToolDescription {
+            name: "kv_get".into(),
+            description: "Read a value from the key-value store. Returns nil if the key does not exist.".into(),
+            args: vec![("key".into(), "string — the key to look up".into())],
+            returns: vec![("value".into(), "string or nil — the stored value".into())],
+        },
+        ToolDescription {
+            name: "kv_set".into(),
+            description: "Write a value to the key-value store.".into(),
+            args: vec![
+                ("key".into(), "string — the key to set".into()),
+                ("value".into(), "string — the value to store".into()),
+            ],
+            returns: vec![],
+        },
+        ToolDescription {
+            name: "llm_query".into(),
+            description: "Ask an LLM a question. Use this for fuzzy reasoning, summarisation, or classification tasks that can't be done with string manipulation.".into(),
+            args: vec![
+                ("prompt".into(), "string — the question or instruction for the LLM".into()),
+                ("context".into(), "string (optional) — additional context to include".into()),
+            ],
+            returns: vec![("response".into(), "string — the LLM's response".into())],
+        },
+        ToolDescription {
+            name: "time_now".into(),
+            description: "Returns the current Unix timestamp in seconds.".into(),
+            args: vec![],
+            returns: vec![("timestamp".into(), "integer — Unix timestamp in seconds".into())],
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn str_key(s: &str) -> LuaKey {
-        LuaKey::String(LuaString::from_str(s))
-    }
 
     fn make_args(pairs: &[(&str, LuaValue)]) -> LuaTable {
         let mut t = LuaTable::new();
@@ -75,7 +324,7 @@ mod tests {
         t
     }
 
-    // ── echo ─────────────────────────────────────────────────────────
+    // ── StubHost: echo ───────────────────────────────────────────────
 
     #[test]
     fn echo_returns_message() {
@@ -239,9 +488,163 @@ mod tests {
             assert!(!desc.description.is_empty());
         }
     }
+
+    // ── LiveHost: kv_get / kv_set ────────────────────────────────────
+
+    fn make_live_host() -> LiveHost {
+        // LlmClient with dummy key — won't be called in KV/time tests
+        let llm = LlmClient::new("dummy-key".into(), "dummy-model".into());
+        LiveHost::new(llm)
+    }
+
+    #[test]
+    fn kv_set_then_get() {
+        let mut host = make_live_host();
+        let set_args = make_args(&[
+            ("key", LuaValue::String(LuaString::from_str("name"))),
+            ("value", LuaValue::String(LuaString::from_str("alice"))),
+        ]);
+        host.call_tool("kv_set", &set_args).unwrap();
+
+        let get_args = make_args(&[("key", LuaValue::String(LuaString::from_str("name")))]);
+        let resp = host.call_tool("kv_get", &get_args).unwrap();
+        assert_eq!(
+            resp.get(&str_key("value")),
+            Some(&LuaValue::String(LuaString::from_str("alice")))
+        );
+    }
+
+    #[test]
+    fn kv_get_missing_key_returns_nil() {
+        let mut host = make_live_host();
+        let args = make_args(&[("key", LuaValue::String(LuaString::from_str("nope")))]);
+        let resp = host.call_tool("kv_get", &args).unwrap();
+        // rawset with Nil is a no-op in LuaTable, so key is absent
+        assert_eq!(resp.get(&str_key("value")), None);
+    }
+
+    #[test]
+    fn kv_set_overwrites() {
+        let mut host = make_live_host();
+        let set1 = make_args(&[
+            ("key", LuaValue::String(LuaString::from_str("x"))),
+            ("value", LuaValue::String(LuaString::from_str("old"))),
+        ]);
+        host.call_tool("kv_set", &set1).unwrap();
+        let set2 = make_args(&[
+            ("key", LuaValue::String(LuaString::from_str("x"))),
+            ("value", LuaValue::String(LuaString::from_str("new"))),
+        ]);
+        host.call_tool("kv_set", &set2).unwrap();
+
+        let get = make_args(&[("key", LuaValue::String(LuaString::from_str("x")))]);
+        let resp = host.call_tool("kv_get", &get).unwrap();
+        assert_eq!(
+            resp.get(&str_key("value")),
+            Some(&LuaValue::String(LuaString::from_str("new")))
+        );
+    }
+
+    #[test]
+    fn kv_get_missing_key_arg_errors() {
+        let mut host = make_live_host();
+        let err = host.call_tool("kv_get", &LuaTable::new()).unwrap_err();
+        assert!(err.contains("missing required arg 'key'"));
+    }
+
+    #[test]
+    fn kv_set_missing_key_arg_errors() {
+        let mut host = make_live_host();
+        let args = make_args(&[("value", LuaValue::String(LuaString::from_str("v")))]);
+        let err = host.call_tool("kv_set", &args).unwrap_err();
+        assert!(err.contains("missing required arg 'key'"));
+    }
+
+    #[test]
+    fn kv_set_missing_value_arg_errors() {
+        let mut host = make_live_host();
+        let args = make_args(&[("key", LuaValue::String(LuaString::from_str("k")))]);
+        let err = host.call_tool("kv_set", &args).unwrap_err();
+        assert!(err.contains("missing required arg 'value'"));
+    }
+
+    // ── LiveHost: time_now ───────────────────────────────────────────
+
+    #[test]
+    fn live_time_now_returns_recent_timestamp() {
+        let mut host = make_live_host();
+        let resp = host.call_tool("time_now", &LuaTable::new()).unwrap();
+        let ts = match resp.get(&str_key("timestamp")) {
+            Some(LuaValue::Integer(n)) => *n,
+            other => panic!("expected integer timestamp, got {other:?}"),
+        };
+        // Should be a reasonable Unix timestamp (after 2024)
+        assert!(ts > 1_700_000_000);
+    }
+
+    // ── LiveHost: unknown tool ───────────────────────────────────────
+
+    #[test]
+    fn live_unknown_tool_errors() {
+        let mut host = make_live_host();
+        let err = host.call_tool("bogus", &LuaTable::new()).unwrap_err();
+        assert!(err.contains("unknown tool 'bogus'"));
+    }
+
+    // ── LiveHost: http arg validation ────────────────────────────────
+
+    #[test]
+    fn http_get_missing_url_errors() {
+        let mut host = make_live_host();
+        let err = host.call_tool("http_get", &LuaTable::new()).unwrap_err();
+        assert!(err.contains("missing required arg 'url'"));
+    }
+
+    #[test]
+    fn http_post_missing_url_errors() {
+        let mut host = make_live_host();
+        let args = make_args(&[("body", LuaValue::String(LuaString::from_str("{}")))]);
+        let err = host.call_tool("http_post", &args).unwrap_err();
+        assert!(err.contains("missing required arg 'url'"));
+    }
+
+    #[test]
+    fn http_post_missing_body_errors() {
+        let mut host = make_live_host();
+        let args = make_args(&[(
+            "url",
+            LuaValue::String(LuaString::from_str("http://example.com")),
+        )]);
+        let err = host.call_tool("http_post", &args).unwrap_err();
+        assert!(err.contains("missing required arg 'body'"));
+    }
+
+    // ── live tool descriptions ───────────────────────────────────────
+
+    #[test]
+    fn live_descriptions_have_all_tools() {
+        let descs = live_tool_descriptions();
+        let names: Vec<&str> = descs.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"http_get"));
+        assert!(names.contains(&"http_post"));
+        assert!(names.contains(&"kv_get"));
+        assert!(names.contains(&"kv_set"));
+        assert!(names.contains(&"llm_query"));
+        assert!(names.contains(&"time_now"));
+    }
+
+    #[test]
+    fn live_descriptions_have_content() {
+        let descs = live_tool_descriptions();
+        for desc in &descs {
+            assert!(!desc.name.is_empty());
+            assert!(!desc.description.is_empty());
+        }
+    }
 }
 
-/// Tool descriptions for the stub host (used in prompt generation).
+/// Tool descriptions for the stub host (used in tests).
+#[cfg(test)]
 pub fn stub_tool_descriptions() -> Vec<crate::prompt::ToolDescription> {
     use crate::prompt::ToolDescription;
     vec![

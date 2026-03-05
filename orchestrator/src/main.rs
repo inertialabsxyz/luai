@@ -47,7 +47,7 @@ fn main() {
     let client = llm::LlmClient::new(api_key, cli.model.clone());
 
     // Build tool catalogue and system prompt
-    let tool_descs = tools::stub_tool_descriptions();
+    let tool_descs = tools::live_tool_descriptions();
     let system_prompt = prompt::build_system_prompt(&tool_descs);
 
     if cli.verbose {
@@ -110,7 +110,8 @@ fn main() {
         };
 
         // Execute
-        let output = match pipeline::execute(&program, LuaValue::Nil, config.clone(), tools::StubHost) {
+        let host = tools::LiveHost::new(client.clone());
+        let output = match pipeline::execute(&program, LuaValue::Nil, config.clone(), host) {
             Ok(o) => o,
             Err(e) => {
                 eprintln!("[attempt {attempt}] {e}");

@@ -45,10 +45,12 @@ pub struct ToolDescription {
 
 /// A named collection of tool descriptions that can be loaded from JSON.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(dead_code)]
 pub struct ToolCatalogue {
     pub tools: Vec<ToolDescription>,
 }
 
+#[allow(dead_code)]
 impl ToolCatalogue {
     pub fn new(tools: Vec<ToolDescription>) -> Self {
         ToolCatalogue { tools }
