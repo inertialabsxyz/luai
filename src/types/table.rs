@@ -12,11 +12,54 @@ use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 // | Boolean   | `false` < `true`             |
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum LuaKey {
     Integer(i64),
     String(LuaString), // interned or Arc<[u8]>
     Boolean(bool),
+}
+
+#[cfg(feature = "serde")]
+mod serde_key {
+    use super::*;
+    #[cfg(not(feature = "std"))]
+    use alloc::{format, string::String};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+
+    // LuaKey serializes as a tagged string: "i:<n>", "s:<text>", "b:<bool>"
+    // so it can be used as a JSON map key while preserving type info for roundtrips.
+
+    impl Serialize for LuaKey {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            match self {
+                LuaKey::Integer(n) => s.serialize_str(&format!("i:{n}")),
+                LuaKey::String(st) => {
+                    let text = core::str::from_utf8(st.as_bytes())
+                        .map_err(serde::ser::Error::custom)?;
+                    s.serialize_str(&format!("s:{text}"))
+                }
+                LuaKey::Boolean(b) => s.serialize_str(&format!("b:{b}")),
+            }
+        }
+    }
+
+    impl<'de> Deserialize<'de> for LuaKey {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            let raw = String::deserialize(d)?;
+            if let Some(rest) = raw.strip_prefix("i:") {
+                let n: i64 = rest.parse().map_err(de::Error::custom)?;
+                Ok(LuaKey::Integer(n))
+            } else if let Some(rest) = raw.strip_prefix("s:") {
+                Ok(LuaKey::String(LuaString::from_str(rest)))
+            } else if let Some(rest) = raw.strip_prefix("b:") {
+                let b: bool = rest.parse().map_err(de::Error::custom)?;
+                Ok(LuaKey::Boolean(b))
+            } else {
+                Err(de::Error::custom(format!(
+                    "invalid LuaKey format: {raw}"
+                )))
+            }
+        }
+    }
 }
 
 /// Result of a tracked rawset operation.

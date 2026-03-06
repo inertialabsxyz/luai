@@ -772,10 +772,12 @@ dependencies = [
  "clap",
  "dotenvy",
  "luai",
+ "luai_prover",
  "reqwest",
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
 ]
 
 [[package]]

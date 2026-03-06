@@ -120,7 +120,7 @@ pub struct PCallCheckpoint {
 
 // ── Output ────────────────────────────────────────────────────────────────────
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct VmOutput {
     pub return_value: LuaValue,
@@ -481,8 +481,10 @@ impl<H: HostInterface> Vm<H> {
             }
 
             Instruction::And(offset) => {
-                // Short-circuit: if top is falsy, jump (leave falsy on stack).
-                // If truthy, pop it (right side will be evaluated).
+                // Short-circuit: if top is falsy, jump past RHS (leave falsy
+                // on stack as the result).  If truthy, fall through — the
+                // compiler emits a Pop to discard the LHS before evaluating
+                // the RHS.
                 let top = self
                     .stack
                     .last()
@@ -491,14 +493,14 @@ impl<H: HostInterface> Vm<H> {
                     .clone();
                 if !top.is_truthy() {
                     self.jump_by(offset);
-                } else {
-                    self.stack.pop();
                 }
             }
 
             Instruction::Or(offset) => {
-                // Short-circuit: if top is truthy, jump (leave truthy on stack).
-                // If falsy, pop it (right side will be evaluated).
+                // Short-circuit: if top is truthy, jump past RHS (leave truthy
+                // on stack as the result).  If falsy, fall through — the
+                // compiler emits a Pop to discard the LHS before evaluating
+                // the RHS.
                 let top = self
                     .stack
                     .last()
@@ -507,8 +509,6 @@ impl<H: HostInterface> Vm<H> {
                     .clone();
                 if top.is_truthy() {
                     self.jump_by(offset);
-                } else {
-                    self.stack.pop();
                 }
             }
 

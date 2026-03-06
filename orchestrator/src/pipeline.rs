@@ -561,4 +561,54 @@ return 1"#;
             "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
     }
+
+    #[test]
+    fn string_format_unsupported_returns_error_not_panic() {
+        // Reproducer: LLM generates string.format with width specifiers (%04d)
+        // and many local variables. Should return a runtime error, not panic.
+        let source = r#"
+local result = tool.call("time_now", {})
+local timestamp = result.timestamp
+local seconds = timestamp % 60
+local minutes = (timestamp // 60) % 60
+local hours = (timestamp // 3600) % 24
+local days = timestamp // 86400
+local year = 1970
+local month = 1
+local day = 1
+local days_remaining = days
+while days_remaining >= 365 do
+    if year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0) then
+        if days_remaining >= 366 then
+            days_remaining = days_remaining - 366
+            year = year + 1
+        else
+            break
+        end
+    else
+        days_remaining = days_remaining - 365
+        year = year + 1
+    end
+end
+local days_in_month = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+if year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0) then
+    days_in_month[2] = 29
+end
+while days_remaining >= days_in_month[month] do
+    days_remaining = days_remaining - days_in_month[month]
+    month = month + 1
+    if month > 12 then
+        month = 1
+        year = year + 1
+    end
+end
+day = day + days_remaining
+local time_string = string.format("%04d-%02d-%02d %02d:%02d:%02d UTC",
+    year, month, day, hours, minutes, seconds)
+return time_string
+"#;
+        let program = compile_and_verify(source).unwrap();
+        let result = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost);
+        assert!(result.is_err(), "should return error for unsupported format specifier");
+    }
 }

@@ -33,8 +33,9 @@ fn main() {
         &output,
     );
 
-    println!("{:?}", public_inputs);
     assert!(public_inputs == dry_run_result.public_inputs);
-
-    println!("Looks good :)");
+    openvm::io::reveal_bytes32(public_inputs.program_hash);
+    openvm::io::reveal_bytes32(public_inputs.input_hash);
+    openvm::io::reveal_bytes32(public_inputs.tool_responses_hash);
+    openvm::io::reveal_bytes32(public_inputs.output_hash);
 }

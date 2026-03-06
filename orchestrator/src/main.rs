@@ -1,6 +1,7 @@
 mod llm;
 mod pipeline;
 mod prompt;
+mod prove;
 mod tools;
 
 use clap::Parser;
@@ -31,6 +32,14 @@ struct Cli {
     /// Show verbose output (generated prompts, raw LLM responses)
     #[arg(long, short)]
     verbose: bool,
+
+    /// Generate ZK proof artifacts after successful execution
+    #[arg(long)]
+    prove: bool,
+
+    /// Output directory for proof artifacts (used with --prove)
+    #[arg(long, default_value = "proof-output")]
+    prove_output: String,
 }
 
 fn main() {
@@ -136,6 +145,24 @@ fn main() {
         };
 
         // Success
+        let prove_artifacts = if cli.prove {
+            let artifacts = prove::build_proof_artifacts(
+                &program,
+                &LuaValue::Nil,
+                output.clone(),
+                &cli.prove_output,
+            );
+            match artifacts {
+                Ok(a) => Some(a),
+                Err(e) => {
+                    eprintln!("error: proof artifact generation failed: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let result = pipeline::PipelineResult {
             task: cli.task.clone(),
             model: cli.model.clone(),
@@ -146,9 +173,12 @@ fn main() {
         };
 
         if cli.json {
-            print_json(&result);
+            print_json(&result, &prove_artifacts);
         } else {
             print!("{}", pipeline::format_output(&result));
+            if let Some(ref artifacts) = prove_artifacts {
+                print!("\n{}", prove::format_prove_section(artifacts));
+            }
         }
         return;
     }
@@ -157,7 +187,7 @@ fn main() {
     std::process::exit(1);
 }
 
-fn print_json(result: &pipeline::PipelineResult) {
+fn print_json(result: &pipeline::PipelineResult, prove_artifacts: &Option<prove::ProveArtifacts>) {
     let hashes = pipeline::compute_hashes(result);
 
     let transcript: Vec<serde_json::Value> = result
@@ -180,7 +210,7 @@ fn print_json(result: &pipeline::PipelineResult) {
         })
         .collect();
 
-    let json = serde_json::json!({
+    let mut json = serde_json::json!({
         "task": result.task,
         "model": result.model,
         "source": result.source,
@@ -202,5 +232,19 @@ fn print_json(result: &pipeline::PipelineResult) {
             "output_hash": hashes.output_hash,
         },
     });
+
+    if let Some(artifacts) = prove_artifacts {
+        let pi = &artifacts.public_inputs;
+        let hex = |h: &[u8; 32]| -> String { h.iter().map(|b| format!("{b:02x}")).collect() };
+        json["proving"] = serde_json::json!({
+            "program_hash": hex(&pi.program_hash),
+            "input_hash": hex(&pi.input_hash),
+            "tool_responses_hash": hex(&pi.tool_responses_hash),
+            "output_hash": hex(&pi.output_hash),
+            "compiled_path": artifacts.compiled_path.to_string_lossy(),
+            "dry_result_path": artifacts.dry_result_path.to_string_lossy(),
+        });
+    }
+
     println!("{}", serde_json::to_string_pretty(&json).unwrap());
 }
