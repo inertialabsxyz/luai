@@ -36,6 +36,9 @@ struct Cli {
 fn main() {
     let cli = Cli::parse();
 
+    // Load .env file if present (silently ignore if missing)
+    let _ = dotenvy::dotenv();
+
     let api_key = match std::env::var("ANTHROPIC_API_KEY") {
         Ok(key) => key,
         Err(_) => {
