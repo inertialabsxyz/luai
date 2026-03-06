@@ -1,3 +1,5 @@
+use sha2::{Digest, Sha256};
+
 use luai::{
     bytecode,
     compiler::{self, proto::CompiledProgram},
@@ -13,9 +15,47 @@ use luai::{
 /// Result of a successful pipeline execution.
 #[derive(Debug)]
 pub struct PipelineResult {
+    pub task: String,
+    pub model: String,
     pub source: String,
     pub output: VmOutput,
+    pub config: VmConfig,
     pub attempts: usize,
+}
+
+/// Verification hashes for a pipeline result.
+#[derive(Debug, Clone)]
+pub struct VerificationHashes {
+    pub program_hash: String,
+    pub tape_hash: String,
+    pub output_hash: String,
+}
+
+/// Compute SHA-256 hex digest of bytes.
+fn sha256_hex(data: &[u8]) -> String {
+    let hash = Sha256::digest(data);
+    format!("sha256:{hash:x}")
+}
+
+/// Compute verification hashes for a pipeline result.
+pub fn compute_hashes(result: &PipelineResult) -> VerificationHashes {
+    let program_hash = sha256_hex(result.source.as_bytes());
+
+    // Tape hash: concatenation of all tool call canonical args + responses
+    let mut tape_data = Vec::new();
+    for r in &result.output.transcript {
+        tape_data.extend_from_slice(&r.args_canonical);
+        tape_data.extend_from_slice(&r.response_canonical);
+    }
+    let tape_hash = sha256_hex(&tape_data);
+
+    let output_hash = sha256_hex(format!("{}", result.output.return_value).as_bytes());
+
+    VerificationHashes {
+        program_hash,
+        tape_hash,
+        output_hash,
+    }
 }
 
 /// Errors from the compile → verify → execute pipeline.
@@ -91,12 +131,27 @@ pub fn format_error_for_retry(source: &str, err: &PipelineError) -> String {
     ctx
 }
 
+/// Format a byte count into a human-readable string with commas.
+fn format_number(n: u64) -> String {
+    let s = n.to_string();
+    let mut result = String::new();
+    for (i, ch) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            result.push(',');
+        }
+        result.push(ch);
+    }
+    result.chars().rev().collect()
+}
+
 /// Format the execution output for display.
 pub fn format_output(result: &PipelineResult) -> String {
     let mut out = String::new();
 
     out.push_str("═══ luai execution report ═══\n\n");
 
+    out.push_str(&format!("Task:     \"{}\"\n", result.task));
+    out.push_str(&format!("Model:    {}\n", result.model));
     out.push_str(&format!("Attempts: {}\n\n", result.attempts));
 
     out.push_str("── Generated program ──────────────────────────\n");
@@ -120,7 +175,7 @@ pub fn format_output(result: &PipelineResult) -> String {
             let args = String::from_utf8_lossy(&r.args_canonical);
             let status = match r.status {
                 ToolCallStatus::Ok => format!("ok ({} bytes)", r.response_bytes),
-                ToolCallStatus::Error => "error".to_string(),
+                ToolCallStatus::Error => format!("error: {}", r.error_message),
             };
             out.push_str(&format!(
                 "  [{}] {} args={} → {}\n",
@@ -133,16 +188,25 @@ pub fn format_output(result: &PipelineResult) -> String {
     out.push_str("── Resource usage ─────────────────────────────\n");
     out.push_str(&format!(
         "  Gas:    {} / {}\n",
-        result.output.gas_used, "10,000,000"
+        format_number(result.output.gas_used),
+        format_number(result.config.gas_limit)
     ));
     out.push_str(&format!(
-        "  Memory: {} bytes\n",
-        result.output.memory_used
+        "  Memory: {} / {} bytes\n",
+        format_number(result.output.memory_used),
+        format_number(result.config.memory_limit_bytes)
     ));
     out.push_str(&format!(
-        "  Tools:  {} call(s)\n",
-        result.output.transcript.len()
+        "  Tools:  {} / {} calls\n\n",
+        result.output.transcript.len(),
+        result.config.max_tool_calls
     ));
+
+    let hashes = compute_hashes(result);
+    out.push_str("── Verification ───────────────────────────────\n");
+    out.push_str(&format!("  Program hash:  {}\n", hashes.program_hash));
+    out.push_str(&format!("  Tape hash:     {}\n", hashes.tape_hash));
+    out.push_str(&format!("  Output hash:   {}\n", hashes.output_hash));
 
     out
 }
@@ -341,28 +405,60 @@ return r1.result + r2.result
         assert!(ctx.contains("Please fix the program"));
     }
 
+    // ── helpers ───────────────────────────────────────────────────────
+
+    fn make_result(source: &str, output: VmOutput, attempts: usize) -> PipelineResult {
+        PipelineResult {
+            task: "test task".into(),
+            model: "test-model".into(),
+            source: source.into(),
+            output,
+            config: VmConfig::default(),
+            attempts,
+        }
+    }
+
+    // ── format_number ───────────────────────────────────────────────
+
+    #[test]
+    fn format_number_small() {
+        assert_eq!(format_number(0), "0");
+        assert_eq!(format_number(42), "42");
+        assert_eq!(format_number(999), "999");
+    }
+
+    #[test]
+    fn format_number_with_commas() {
+        assert_eq!(format_number(1_000), "1,000");
+        assert_eq!(format_number(1_234_567), "1,234,567");
+        assert_eq!(format_number(16_777_216), "16,777,216");
+    }
+
     // ── format_output ────────────────────────────────────────────────
 
     #[test]
     fn format_output_simple() {
         let program = compile_and_verify("return 42").unwrap();
         let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
-        let result = PipelineResult {
-            source: "return 42".into(),
-            output,
-            attempts: 1,
-        };
+        let result = make_result("return 42", output, 1);
         let formatted = format_output(&result);
         assert!(formatted.contains("luai execution report"));
+        assert!(formatted.contains("Task:     \"test task\""));
+        assert!(formatted.contains("Model:    test-model"));
         assert!(formatted.contains("Attempts: 1"));
         assert!(formatted.contains("return 42"));
         assert!(formatted.contains("42")); // return value
         assert!(formatted.contains("Gas:"));
         assert!(formatted.contains("Memory:"));
-        assert!(formatted.contains("Tools:  0 call(s)"));
+        assert!(formatted.contains("Tools:  0 / 16 calls"));
         // No logs or transcript sections for this simple program
         assert!(!formatted.contains("── Logs"));
         assert!(!formatted.contains("── Transcript"));
+        // Verification section present
+        assert!(formatted.contains("── Verification"));
+        assert!(formatted.contains("Program hash:  sha256:"));
+        assert!(formatted.contains("Tape hash:     sha256:"));
+        assert!(formatted.contains("Output hash:   sha256:"));
     }
 
     #[test]
@@ -372,17 +468,97 @@ local r = tool.call("echo", {message = "hi"})
 return 0"#;
         let program = compile_and_verify(source).unwrap();
         let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
-        let result = PipelineResult {
-            source: source.into(),
-            output,
-            attempts: 2,
-        };
+        let result = make_result(source, output, 2);
         let formatted = format_output(&result);
         assert!(formatted.contains("Attempts: 2"));
         assert!(formatted.contains("── Logs"));
         assert!(formatted.contains("debug info"));
         assert!(formatted.contains("── Transcript"));
         assert!(formatted.contains("echo"));
-        assert!(formatted.contains("Tools:  1 call(s)"));
+        assert!(formatted.contains("Tools:  1 / 16 calls"));
+    }
+
+    #[test]
+    fn format_output_resource_limits() {
+        let program = compile_and_verify("return 1").unwrap();
+        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let result = make_result("return 1", output, 1);
+        let formatted = format_output(&result);
+        // Should show used / limit format
+        assert!(formatted.contains(" / 200,000\n")); // gas limit
+        assert!(formatted.contains(" / 16,777,216 bytes\n")); // memory limit
+    }
+
+    // ── compute_hashes ──────────────────────────────────────────────
+
+    #[test]
+    fn hashes_deterministic() {
+        let program = compile_and_verify("return 42").unwrap();
+        let output1 = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let output2 = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let r1 = make_result("return 42", output1, 1);
+        let r2 = make_result("return 42", output2, 1);
+        let h1 = compute_hashes(&r1);
+        let h2 = compute_hashes(&r2);
+        assert_eq!(h1.program_hash, h2.program_hash);
+        assert_eq!(h1.tape_hash, h2.tape_hash);
+        assert_eq!(h1.output_hash, h2.output_hash);
+    }
+
+    #[test]
+    fn hashes_differ_for_different_source() {
+        let p1 = compile_and_verify("return 42").unwrap();
+        let p2 = compile_and_verify("return 99").unwrap();
+        let o1 = execute(&p1, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let o2 = execute(&p2, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let r1 = make_result("return 42", o1, 1);
+        let r2 = make_result("return 99", o2, 1);
+        let h1 = compute_hashes(&r1);
+        let h2 = compute_hashes(&r2);
+        assert_ne!(h1.program_hash, h2.program_hash);
+        assert_ne!(h1.output_hash, h2.output_hash);
+    }
+
+    #[test]
+    fn hashes_differ_with_tool_calls() {
+        let src_no_tool = "return 1";
+        let src_tool = r#"local r = tool.call("echo", {message = "hi"})
+return 1"#;
+        let p1 = compile_and_verify(src_no_tool).unwrap();
+        let p2 = compile_and_verify(src_tool).unwrap();
+        let o1 = execute(&p1, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let o2 = execute(&p2, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let r1 = make_result(src_no_tool, o1, 1);
+        let r2 = make_result(src_tool, o2, 1);
+        let h1 = compute_hashes(&r1);
+        let h2 = compute_hashes(&r2);
+        // Same output but different tape (one has tool calls)
+        assert_eq!(h1.output_hash, h2.output_hash);
+        assert_ne!(h1.tape_hash, h2.tape_hash);
+    }
+
+    #[test]
+    fn hash_format_starts_with_sha256() {
+        let program = compile_and_verify("return 1").unwrap();
+        let output = execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
+        let result = make_result("return 1", output, 1);
+        let hashes = compute_hashes(&result);
+        assert!(hashes.program_hash.starts_with("sha256:"));
+        assert!(hashes.tape_hash.starts_with("sha256:"));
+        assert!(hashes.output_hash.starts_with("sha256:"));
+        // SHA-256 hex is 64 chars + "sha256:" prefix = 71
+        assert_eq!(hashes.program_hash.len(), 71);
+    }
+
+    // ── sha256_hex ──────────────────────────────────────────────────
+
+    #[test]
+    fn sha256_known_value() {
+        // SHA-256 of empty string
+        let h = sha256_hex(b"");
+        assert_eq!(
+            h,
+            "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
     }
 }

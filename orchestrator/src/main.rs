@@ -134,8 +134,11 @@ fn main() {
 
         // Success
         let result = pipeline::PipelineResult {
+            task: cli.task.clone(),
+            model: cli.model.clone(),
             source,
             output,
+            config: config.clone(),
             attempts: attempt,
         };
 
@@ -152,14 +155,49 @@ fn main() {
 }
 
 fn print_json(result: &pipeline::PipelineResult) {
+    let hashes = pipeline::compute_hashes(result);
+
+    let transcript: Vec<serde_json::Value> = result
+        .output
+        .transcript
+        .iter()
+        .map(|r| {
+            let args_str = String::from_utf8_lossy(&r.args_canonical).to_string();
+            let response_str = String::from_utf8_lossy(&r.response_canonical).to_string();
+            serde_json::json!({
+                "seq": r.seq,
+                "tool": r.tool_name,
+                "args": serde_json::from_str::<serde_json::Value>(&args_str).unwrap_or(serde_json::Value::String(args_str)),
+                "response": serde_json::from_str::<serde_json::Value>(&response_str).unwrap_or(serde_json::Value::String(response_str)),
+                "response_hash": r.response_hash,
+                "response_bytes": r.response_bytes,
+                "status": format!("{:?}", r.status),
+                "gas_charged": r.gas_charged,
+            })
+        })
+        .collect();
+
     let json = serde_json::json!({
+        "task": result.task,
+        "model": result.model,
         "source": result.source,
         "attempts": result.attempts,
         "return_value": format!("{}", result.output.return_value),
         "logs": result.output.logs,
-        "gas_used": result.output.gas_used,
-        "memory_used": result.output.memory_used,
-        "tool_calls": result.output.transcript.len(),
+        "resource_usage": {
+            "gas_used": result.output.gas_used,
+            "gas_limit": result.config.gas_limit,
+            "memory_used": result.output.memory_used,
+            "memory_limit": result.config.memory_limit_bytes,
+            "tool_calls": result.output.transcript.len(),
+            "tool_call_limit": result.config.max_tool_calls,
+        },
+        "transcript": transcript,
+        "verification": {
+            "program_hash": hashes.program_hash,
+            "tape_hash": hashes.tape_hash,
+            "output_hash": hashes.output_hash,
+        },
     });
     println!("{}", serde_json::to_string_pretty(&json).unwrap());
 }
