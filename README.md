@@ -111,6 +111,56 @@ Every run produces a report with:
 
 The `--json` flag outputs all of this as structured JSON for machine consumption.
 
+### ZK proof artifacts
+
+With `--prove`, the orchestrator generates ZK proof artifacts after successful execution:
+
+```
+cargo run -p luai-orchestrator -- --prove "score this wallet for onchain reputation"
+```
+
+This produces `proof-output/compiled.json` and `proof-output/dry_result.json` — the inputs needed to generate a cryptographic proof via OpenVM. The proof attests that:
+
+- **This specific program** was executed (program hash)
+- **These specific API responses** were consumed (tool responses hash)
+- **This specific output** was produced (output hash)
+
+A third party can verify the proof without trusting the executor. The execution is deterministic: given the same program and oracle tape, anyone can replay it and get the identical result.
+
+**Current trust boundary:** The ZK proof guarantees computational integrity — that the program ran correctly and produced the claimed output from the claimed inputs. It does not yet guarantee data provenance (that API responses came from the real servers). TLS attestation (verifying server certificates inside the VM) is planned to close this gap.
+
+### Benchmarks: luai vs LangChain ReAct
+
+luai generates a complete program in a single LLM call, then executes it in the VM at zero token cost. Traditional agent frameworks like LangChain use a ReAct loop where each tool call is a round-trip through the LLM, with the full conversation history growing at each step.
+
+**Task: Onchain wallet reputation scoring (2 API calls)**
+
+| | luai | LangChain |
+|---|---|---|
+| LLM calls | 1 | 2 |
+| Input tokens | 1,568 | 1,951 |
+| Output tokens | 1,273 | 777 |
+| **Total tokens** | **2,841** | **2,728** |
+
+**Task: Multi-chain wallet scoring (8 API calls across 4 chains)**
+
+| | luai | LangChain |
+|---|---|---|
+| LLM calls | 1 | 2 |
+| Input tokens | — | 4,004 |
+| Output tokens | — | 1,163 |
+| **Total tokens** | **3,346** | **5,167** |
+
+At 8 API calls, LangChain uses **1.55x** more tokens. The gap widens with task complexity: each additional tool call adds API response data to LangChain's conversation context, while luai's execution cost remains zero tokens regardless of how many tool calls the program makes.
+
+Beyond token efficiency, luai produces a cryptographic proof of correct execution. LangChain produces an answer — luai produces an answer anyone can verify.
+
+Benchmark scripts are in `examples/`:
+- `examples/score-wallet.sh` — single-chain scoring (luai)
+- `examples/multichain-score-wallet.sh` — multi-chain scoring (luai)
+- `examples/score-wallet-langchain.py` — single-chain scoring (LangChain)
+- `examples/multichain-score-langchain.py` — multi-chain scoring (LangChain)
+
 ## Standard library
 
 | Module | Functions |
