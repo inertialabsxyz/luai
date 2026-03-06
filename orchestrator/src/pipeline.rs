@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256};
 use luai::{
     bytecode,
     compiler::{self, proto::CompiledProgram},
-    host::transcript::ToolCallStatus,
+    host::{canonicalize::canonical_serialize, transcript::ToolCallStatus},
     parser,
     types::value::LuaValue,
     vm::{
@@ -11,6 +11,46 @@ use luai::{
         gas::VmError,
     },
 };
+
+/// Format a LuaValue as a serde_json::Value for JSON output.
+pub fn format_return_value(v: &LuaValue) -> serde_json::Value {
+    match v {
+        LuaValue::Table(_) => {
+            match canonical_serialize(v) {
+                Ok(bytes) => {
+                    let compact = String::from_utf8_lossy(&bytes);
+                    serde_json::from_str(&compact).unwrap_or(serde_json::Value::String(compact.into_owned()))
+                }
+                Err(_) => serde_json::Value::String(format!("{v}")),
+            }
+        }
+        LuaValue::Nil => serde_json::Value::Null,
+        LuaValue::Boolean(b) => serde_json::Value::Bool(*b),
+        LuaValue::Integer(n) => serde_json::json!(n),
+        LuaValue::String(s) => serde_json::Value::String(String::from_utf8_lossy(s.as_bytes()).into_owned()),
+        _ => serde_json::Value::String(format!("{v}")),
+    }
+}
+
+/// Format a LuaValue for display, rendering tables as readable JSON.
+fn format_value(v: &LuaValue) -> String {
+    match v {
+        LuaValue::Table(_) => {
+            match canonical_serialize(v) {
+                Ok(bytes) => {
+                    // canonical_serialize produces compact JSON — pretty-print it
+                    let compact = String::from_utf8_lossy(&bytes);
+                    match serde_json::from_str::<serde_json::Value>(&compact) {
+                        Ok(parsed) => serde_json::to_string_pretty(&parsed).unwrap_or_else(|_| compact.into_owned()),
+                        Err(_) => compact.into_owned(),
+                    }
+                }
+                Err(_) => format!("{v}"),
+            }
+        }
+        _ => format!("{v}"),
+    }
+}
 
 /// Result of a successful pipeline execution.
 #[derive(Debug)]
@@ -21,6 +61,7 @@ pub struct PipelineResult {
     pub output: VmOutput,
     pub config: VmConfig,
     pub attempts: usize,
+    pub token_usage: crate::llm::TokenUsage,
 }
 
 /// Verification hashes for a pipeline result.
@@ -49,7 +90,7 @@ pub fn compute_hashes(result: &PipelineResult) -> VerificationHashes {
     }
     let tape_hash = sha256_hex(&tape_data);
 
-    let output_hash = sha256_hex(format!("{}", result.output.return_value).as_bytes());
+    let output_hash = sha256_hex(format_value(&result.output.return_value).as_bytes());
 
     VerificationHashes {
         program_hash,
@@ -159,7 +200,7 @@ pub fn format_output(result: &PipelineResult) -> String {
     out.push_str("\n\n");
 
     out.push_str("── Result ─────────────────────────────────────\n");
-    out.push_str(&format!("{}\n\n", result.output.return_value));
+    out.push_str(&format!("{}\n\n", format_value(&result.output.return_value)));
 
     if !result.output.logs.is_empty() {
         out.push_str("── Logs ───────────────────────────────────────\n");
@@ -197,9 +238,15 @@ pub fn format_output(result: &PipelineResult) -> String {
         format_number(result.config.memory_limit_bytes)
     ));
     out.push_str(&format!(
-        "  Tools:  {} / {} calls\n\n",
+        "  Tools:  {} / {} calls\n",
         result.output.transcript.len(),
         result.config.max_tool_calls
+    ));
+    out.push_str(&format!(
+        "  LLM:   {} in + {} out = {} tokens\n\n",
+        format_number(result.token_usage.input_tokens),
+        format_number(result.token_usage.output_tokens),
+        format_number(result.token_usage.total())
     ));
 
     let hashes = compute_hashes(result);
@@ -415,6 +462,7 @@ return r1.result + r2.result
             output,
             config: VmConfig::default(),
             attempts,
+            token_usage: crate::llm::TokenUsage::default(),
         }
     }
 

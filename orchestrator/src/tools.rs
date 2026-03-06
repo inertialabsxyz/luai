@@ -214,7 +214,7 @@ impl LiveHost {
             content: user_content,
         }];
 
-        let response = self
+        let llm_response = self
             .llm
             .generate("You are a helpful assistant. Be concise.", &messages)
             .map_err(|e| format!("llm_query failed: {e}"))?;
@@ -222,7 +222,7 @@ impl LiveHost {
         let mut resp = LuaTable::new();
         resp.rawset(
             str_key("response"),
-            LuaValue::String(LuaString::from_str(&response)),
+            LuaValue::String(LuaString::from_str(&llm_response.text)),
         )
         .unwrap();
         Ok(resp)

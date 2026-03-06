@@ -19,7 +19,7 @@ use alloc::{format, rc::Rc, string::{String, ToString}, vec, vec::Vec};
 use core::cell::RefCell;
 
 const MAX_TABLE_DEPTH: usize = 32;
-const MAX_STRING_LEN: usize = 65536; // 64 KB
+const MAX_STRING_LEN: usize = 1024 * 1024; // 1 MB
 
 /// Error type for canonicalization failures.
 #[derive(Debug, Clone, PartialEq, Eq)]

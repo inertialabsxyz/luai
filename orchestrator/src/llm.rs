@@ -24,11 +24,38 @@ pub struct Message {
 #[derive(Debug, Deserialize)]
 struct ApiResponse {
     content: Vec<ContentBlock>,
+    #[serde(default)]
+    usage: Option<ApiUsage>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ContentBlock {
     text: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ApiUsage {
+    input_tokens: u64,
+    output_tokens: u64,
+}
+
+/// Token usage from a single LLM call.
+#[derive(Debug, Clone, Default)]
+pub struct TokenUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+impl TokenUsage {
+    pub fn total(&self) -> u64 {
+        self.input_tokens + self.output_tokens
+    }
+}
+
+/// Response from an LLM generation call.
+pub struct LlmResponse {
+    pub text: String,
+    pub usage: TokenUsage,
 }
 
 #[derive(Debug)]
@@ -65,12 +92,12 @@ impl LlmClient {
     }
 
     /// Generate a Lua program from a system prompt and conversation history.
-    /// Returns the raw text response from the LLM.
+    /// Returns the raw text response and token usage from the LLM.
     pub fn generate(
         &self,
         system_prompt: &str,
         messages: &[Message],
-    ) -> Result<String, LlmError> {
+    ) -> Result<LlmResponse, LlmError> {
         let request = ApiRequest {
             model: self.model.clone(),
             max_tokens: 4096,
@@ -94,6 +121,14 @@ impl LlmClient {
         }
 
         let api_resp: ApiResponse = resp.json()?;
+        let usage = match api_resp.usage {
+            Some(u) => TokenUsage {
+                input_tokens: u.input_tokens,
+                output_tokens: u.output_tokens,
+            },
+            None => TokenUsage::default(),
+        };
+
         let text = api_resp
             .content
             .into_iter()
@@ -105,7 +140,7 @@ impl LlmClient {
             return Err(LlmError::NoContent);
         }
 
-        Ok(text)
+        Ok(LlmResponse { text, usage })
     }
 }
 

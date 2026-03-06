@@ -42,7 +42,7 @@ impl Default for VmConfig {
             max_call_depth: 64,
             max_tool_calls: 16,
             max_tool_bytes_in: 64 * 1024,
-            max_tool_bytes_out: 256 * 1024,
+            max_tool_bytes_out: 1024 * 1024,
             max_output_bytes: 256 * 1024,
         }
     }

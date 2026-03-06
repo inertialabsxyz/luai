@@ -75,18 +75,32 @@ fn main() {
     }];
 
     let config = VmConfig::default();
+    let mut total_usage = llm::TokenUsage::default();
 
     for attempt in 1..=cli.max_retries + 1 {
         // Call LLM
         eprintln!("[attempt {attempt}] generating Lua program...");
 
-        let raw_response = match client.generate(&system_prompt, &messages) {
+        let llm_response = match client.generate(&system_prompt, &messages) {
             Ok(resp) => resp,
             Err(e) => {
                 eprintln!("error: LLM generation failed: {e}");
                 std::process::exit(1);
             }
         };
+
+        let raw_response = llm_response.text;
+        total_usage.input_tokens += llm_response.usage.input_tokens;
+        total_usage.output_tokens += llm_response.usage.output_tokens;
+
+        if cli.verbose {
+            eprintln!(
+                "  tokens: {} in + {} out = {} total",
+                llm_response.usage.input_tokens,
+                llm_response.usage.output_tokens,
+                llm_response.usage.total()
+            );
+        }
 
         let source = llm::strip_code_fences(&raw_response);
 
@@ -170,6 +184,7 @@ fn main() {
             output,
             config: config.clone(),
             attempts: attempt,
+            token_usage: total_usage.clone(),
         };
 
         if cli.json {
@@ -215,7 +230,7 @@ fn print_json(result: &pipeline::PipelineResult, prove_artifacts: &Option<prove:
         "model": result.model,
         "source": result.source,
         "attempts": result.attempts,
-        "return_value": format!("{}", result.output.return_value),
+        "return_value": pipeline::format_return_value(&result.output.return_value),
         "logs": result.output.logs,
         "resource_usage": {
             "gas_used": result.output.gas_used,
@@ -224,6 +239,9 @@ fn print_json(result: &pipeline::PipelineResult, prove_artifacts: &Option<prove:
             "memory_limit": result.config.memory_limit_bytes,
             "tool_calls": result.output.transcript.len(),
             "tool_call_limit": result.config.max_tool_calls,
+            "llm_input_tokens": result.token_usage.input_tokens,
+            "llm_output_tokens": result.token_usage.output_tokens,
+            "llm_total_tokens": result.token_usage.total(),
         },
         "transcript": transcript,
         "verification": {
