@@ -20,6 +20,7 @@ Scripts run as single-shot programs: they receive an input object, may invoke ho
 | `compiler` | CLI: compile Lua source → verified bytecode JSON |
 | `prover` | CLI: dry-run compiled programs, produce oracle tapes and public inputs |
 | `openvm` | OpenVM guest + encoder for zk proof generation and verification |
+| `orchestrator` | LLM-driven agentic pipeline — accepts a task, generates and executes Lua |
 
 ## Architecture
 
@@ -58,6 +59,57 @@ host/            — HostInterface for tool calls; transcript recording;
 ```
 
 Public inputs commit to: program hash, input hash, tool responses hash, output hash.
+
+## Orchestrator
+
+The orchestrator connects an LLM (Claude) to the luai VM, forming an agentic pipeline:
+
+1. User provides a natural-language task
+2. The LLM generates a Lua program to accomplish it
+3. The program is compiled, verified, and executed in the sandboxed VM
+4. Tool calls reach real external services (HTTP, KV store, LLM sub-queries)
+5. On error, the LLM retries with error context (up to N attempts)
+6. A full execution report is produced with verification hashes
+
+### Usage
+
+```
+export ANTHROPIC_API_KEY=sk-...
+cargo run -p luai-orchestrator -- "fetch the top hacker news story title"
+```
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Machine-readable JSON output with full transcript and verification hashes |
+| `--verbose` / `-v` | Show system prompt and raw LLM responses |
+| `--model <model>` | Claude model to use (default: `claude-sonnet-4-20250514`) |
+| `--max-retries <n>` | Max retry attempts on errors (default: 3) |
+
+### Available tools
+
+Programs running in the VM can call these tools via `tool.call(name, args)`:
+
+| Tool | Description |
+|------|-------------|
+| `http_get` | GET a URL, returns `{status, body}` |
+| `http_post` | POST JSON to a URL, returns `{status, body}` |
+| `kv_get` | Read from an in-memory key-value store |
+| `kv_set` | Write to an in-memory key-value store |
+| `llm_query` | Call the LLM for fuzzy reasoning sub-tasks |
+| `time_now` | Current Unix timestamp |
+
+### Execution report
+
+Every run produces a report with:
+- The generated Lua program
+- Return value and logs
+- Full tool call transcript (name, args, response, bytes)
+- Resource usage (gas, memory, tool calls) with limits
+- SHA-256 verification hashes (program, oracle tape, output)
+
+The `--json` flag outputs all of this as structured JSON for machine consumption.
 
 ## Standard library
 
