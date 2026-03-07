@@ -153,13 +153,26 @@ luai generates a complete program in a single LLM call, then executes it in the 
 
 At 8 API calls, LangChain uses **1.55x** more tokens. The gap widens with task complexity: each additional tool call adds API response data to LangChain's conversation context, while luai's execution cost remains zero tokens regardless of how many tool calls the program makes.
 
+**Task: Cross-chain token portfolio analysis (12 API calls, ~69KB response data)**
+
+| | luai | LangChain |
+|---|---|---|
+| LLM calls | 1 | 2 |
+| Input tokens | 1,628 | 26,715 |
+| Output tokens | 1,197 | 1,841 |
+| **Total tokens** | **2,825** | **28,556** |
+
+At 12 API calls with larger payloads (ERC-20 token lists at ~5-25KB each), LangChain uses **10.1x** more tokens. The API response data accumulates in LangChain's conversation context — 69KB of JSON becomes ~26K input tokens on the second LLM call. luai processes all of it in the VM at zero token cost.
+
 Beyond token efficiency, luai produces a cryptographic proof of correct execution. LangChain produces an answer — luai produces an answer anyone can verify.
 
 Benchmark scripts are in `examples/`:
 - `examples/score-wallet.sh` — single-chain scoring (luai)
 - `examples/multichain-score-wallet.sh` — multi-chain scoring (luai)
+- `examples/large-response-processing.sh` — cross-chain token portfolio (luai)
 - `examples/score-wallet-langchain.py` — single-chain scoring (LangChain)
 - `examples/multichain-score-langchain.py` — multi-chain scoring (LangChain)
+- `examples/large-response-langchain.py` — cross-chain token portfolio (LangChain)
 
 ## Standard library
 

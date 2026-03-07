@@ -33,6 +33,18 @@ struct Cli {
     #[arg(long, short)]
     verbose: bool,
 
+    /// VM gas limit (default: 200000)
+    #[arg(long)]
+    gas_limit: Option<u64>,
+
+    /// VM max tool bytes in (default: 65536)
+    #[arg(long)]
+    max_tool_bytes_in: Option<usize>,
+
+    /// VM max tool calls (default: 16)
+    #[arg(long)]
+    max_tool_calls: Option<usize>,
+
     /// Generate ZK proof artifacts after successful execution
     #[arg(long)]
     prove: bool,
@@ -74,7 +86,16 @@ fn main() {
         content: cli.task.clone(),
     }];
 
-    let config = VmConfig::default();
+    let mut config = VmConfig::default();
+    if let Some(gas) = cli.gas_limit {
+        config.gas_limit = gas;
+    }
+    if let Some(bytes_in) = cli.max_tool_bytes_in {
+        config.max_tool_bytes_in = bytes_in;
+    }
+    if let Some(calls) = cli.max_tool_calls {
+        config.max_tool_calls = calls;
+    }
     let mut total_usage = llm::TokenUsage::default();
 
     for attempt in 1..=cli.max_retries + 1 {
