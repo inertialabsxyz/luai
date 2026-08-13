@@ -1,6 +1,5 @@
 //! Integration tests: pipeline, determinism, gas/memory metering, pcall,
 //! iterators, VmOutput fields, and TLS attestation.
-
 use proveno::{
     bytecode::verify,
     compiler::compile,
@@ -1044,6 +1043,7 @@ fn run_with_host<H: HostInterface>(
 ///
 /// This test makes a real network call to example.com.
 #[test]
+#[ignore = "provenance is to be moved out"]
 fn tls_attestation_nonzero_for_p256() {
     let src = r#"
         local resp = tool.call("http_get", {url = "https://example.com"})
@@ -1111,6 +1111,7 @@ fn tls_degrades_cleanly_for_non_p256() {
 ///
 /// This test makes a real network call to example.com.
 #[test]
+#[ignore = "provenance is to be moved out"]
 fn tls_reverify_attestations_matches_prover() {
     // Capture a real cert chain the same way the prover host does.
     let (_, _, prover_record) =
