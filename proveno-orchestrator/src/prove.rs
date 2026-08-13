@@ -12,7 +12,7 @@ use proveno::{
     zkvm::commitment::{PublicInputs, compute_public_inputs},
 };
 use proveno_noir::{ProveOptions, ProveOutputError, prove_from_artifacts};
-use proveno_prover::prover::DryRunResult;
+use proveno_witness::prover::DryRunResult;
 
 /// Paths and public inputs produced by `build_proof_artifacts`.
 pub struct ProveArtifacts {
@@ -455,7 +455,7 @@ return 1"#;
 
     #[test]
     fn public_inputs_match_prover_dry_run() {
-        use proveno_prover::prover::Prover;
+        use proveno_witness::prover::Prover;
 
         let source = r#"local r = tool.call("echo", {message = "test"})
 return r.message"#;
