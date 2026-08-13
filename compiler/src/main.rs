@@ -15,10 +15,7 @@ fn main() {
         std::process::exit(1);
     });
 
-    let out_path = match env::args().nth(2) {
-        Some(p) => p,
-        None => String::from("compiled.json"),
-    };
+    let out_path = env::args().nth(2).unwrap_or_else(|| String::from("compiled.json"));
 
     let ast = match parser::parse(&source) {
         Ok(v) => v,
