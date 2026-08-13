@@ -9,13 +9,13 @@ fn main() {
 
     let compiled_path = args.next().unwrap_or_else(|| {
         eprintln!(
-            "usage: proveno-noir-witness <compiled.json> <dry_result.json> [--circuit-dir <dir>] [--prove]"
+            "usage: proveno-noir <compiled.json> <dry_result.json> [--circuit-dir <dir>] [--prove]"
         );
         std::process::exit(1);
     });
     let dry_path = args.next().unwrap_or_else(|| {
         eprintln!(
-            "usage: proveno-noir-witness <compiled.json> <dry_result.json> [--circuit-dir <dir>] [--prove]"
+            "usage: proveno-noir <compiled.json> <dry_result.json> [--circuit-dir <dir>] [--prove]"
         );
         std::process::exit(1);
     });
