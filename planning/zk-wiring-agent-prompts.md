@@ -77,7 +77,7 @@ The relevant functions are in `src/zkvm/commitment.rs`:
        program.program_hash, &input_value, &dry_run_result.oracle_tape,
        &output, &verified_attestations,
    );
-   // Policy hash is an external commitment declared by the orchestrator,
+   // Policy hash is an external commitment declared by the proveno-orchestrator,
    // not derived from the guest's own execution. Copy it from the dry run.
    public_inputs.policy_hash = dry_run_result.public_inputs.policy_hash;
    assert!(public_inputs == dry_run_result.public_inputs);
@@ -86,7 +86,7 @@ The relevant functions are in `src/zkvm/commitment.rs`:
 
    This preserves the assertion (which still verifies all six fields must match) while threading the policy hash through correctly.
 
-4. **Update `orchestrator/src/bin/bench.rs`** — switch from calling `compute_public_inputs_with_policy` post-hoc to calling `prover::Prover::dry_run_with_policy` so the bench binary exercises the same code path the prover binary will use. The bench binary already imports `proveno_prover`; use `dry_run_with_policy` passing `template_price_feed_v1()`.
+4. **Update `../proveno-orchestrator/src/bin/bench.rs`** — switch from calling `compute_public_inputs_with_policy` post-hoc to calling `prover::Prover::dry_run_with_policy` so the bench binary exercises the same code path the prover binary will use. The bench binary already imports `proveno_prover`; use `dry_run_with_policy` passing `template_price_feed_v1()`.
 
 5. **Add a test** in `prover/src/prover.rs` that:
    - Runs a simple Lua program through `dry_run_with_policy` with `constrained_http_v1()`
@@ -108,14 +108,14 @@ The relevant functions are in `src/zkvm/commitment.rs`:
 cargo test
 # → all tests pass including the new dry_run_with_policy test
 
-cargo run -p proveno_prover -- examples/prover.lua /tmp/dry_result_no_policy.json
+cargo run -p proveno-prover -- examples/prover.lua /tmp/dry_result_no_policy.json
 # → writes dry_result_no_policy.json with policy_hash = "0000...0000"
 
-cargo run -p proveno_prover -- examples/prover.lua /tmp/dry_result_with_policy.json \
+cargo run -p proveno-prover -- examples/prover.lua /tmp/dry_result_with_policy.json \
   --policy constrained_http_v1
 # → writes dry_result_with_policy.json; python3 -c "import json; d=json.load(open('/tmp/dry_result_with_policy.json')); print(d['public_inputs']['policy_hash'])" shows non-zero hex
 
-cargo run -p proveno-orchestrator --bin bench 2>/dev/null | python3 -c "
+cargo run -p proveno-proveno-orchestrator --bin bench 2>/dev/null | python3 -c "
 import json,sys; d=json.load(sys.stdin)
 assert d['policy_hash'] != '0x' + '0'*64, 'policy_hash is zero'
 print('policy_hash OK:', d['policy_hash'])

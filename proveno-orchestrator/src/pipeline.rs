@@ -135,7 +135,7 @@ impl PipelineError {
     }
 }
 
-/// A discrete stage of the orchestrator pipeline. `Compiled` means the
+/// A discrete stage of the proveno-orchestrator pipeline. `Compiled` means the
 /// program made it past `compile_and_verify` (the deepest stage reached
 /// in `--generate-and-compile` mode).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -3,8 +3,8 @@
 # demo-noir-e2e.sh — End-to-end Noir proving demo for proveno.
 #
 # Pipeline:
-#   1. Generate a Lua program with the orchestrator, execute it, and produce a
-#      Noir UltraHonk proof (one `cargo run -p proveno-orchestrator -- … --prove --json`).
+#   1. Generate a Lua program with the proveno-orchestrator, execute it, and produce a
+#      Noir UltraHonk proof (one `cargo run -p proveno-proveno-orchestrator -- … --prove --json`).
 #   2. Deploy the on-chain stack (HonkVerifier + ProvenoVerifier + ProvenoConsumer) or
 #      reuse already-deployed addresses passed through environment variables.
 #   3. Call `ProvenoVerifier.verify(proof, inputs)` (view) on chain and require it
@@ -17,7 +17,7 @@
 #   5. Read back `lastResult` and print a one-line summary.
 #
 # Environment:
-#   ANTHROPIC_API_KEY    required (used by the orchestrator for LLM generation)
+#   ANTHROPIC_API_KEY    required (used by the proveno-orchestrator for LLM generation)
 #   RPC_URL              default: http://127.0.0.1:8545
 #   PRIVATE_KEY          required (used for deploy and for the consumer cast send)
 #   DEPLOY               1 to deploy a fresh stack via forge script, otherwise reuse env addrs
@@ -44,8 +44,8 @@ CIRCUIT_DIR="${CIRCUIT_DIR:-noir}"
 DEPLOY="${DEPLOY:-0}"
 
 # ─── .env autoload ───────────────────────────────────────────────────────────
-# The orchestrator binary reads .env via dotenvy, but this shell script's own
-# prereq checks (e.g. ANTHROPIC_API_KEY below) run before the orchestrator
+# The proveno-orchestrator binary reads .env via dotenvy, but this shell script's own
+# prereq checks (e.g. ANTHROPIC_API_KEY below) run before the proveno-orchestrator
 # starts, so we have to source .env here too. Looks for .env next to this
 # script. Matches dotenvy semantics: existing environment variables win, so
 # `KEY=… ./demo-noir-e2e.sh …` overrides what's in .env.
@@ -78,7 +78,7 @@ require_cmd cast
 require_cmd forge
 require_cmd cargo
 
-# ANTHROPIC_API_KEY is only needed for the orchestrator (LLM) generation path.
+# ANTHROPIC_API_KEY is only needed for the proveno-orchestrator (LLM) generation path.
 # When LUA_SOURCE is set, step 1 compiles a fixed Lua file instead — no LLM.
 if [[ -z "${LUA_SOURCE:-}" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
     echo "error: ANTHROPIC_API_KEY must be set (or set LUA_SOURCE to skip the LLM)" >&2
@@ -110,7 +110,7 @@ cd "$REPO_ROOT"
 # Two backends, both producing the same JSON shape ({proving:{proof_bytes_hex,
 # public_inputs[8]}, return_value}) at $ORCH_JSON:
 #   - LUA_SOURCE set : compile a fixed Lua file (no LLM) and prove it.
-#   - otherwise      : the orchestrator generates a program from $TASK via LLM.
+#   - otherwise      : the proveno-orchestrator generates a program from $TASK via LLM.
 mkdir -p "$PROVE_OUTPUT"
 ORCH_JSON="$PROVE_OUTPUT/orchestrator.json"
 
@@ -129,7 +129,7 @@ if [[ -n "${LUA_SOURCE:-}" ]]; then
         > "$ORCH_JSON"
 else
     echo "── [1/5] Generating Noir proof via orchestrator ──"
-    cargo run --quiet -p proveno-orchestrator -- \
+    cargo run --quiet -p proveno-proveno-orchestrator -- \
         "$TASK" \
         --prove \
         --json \

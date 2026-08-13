@@ -40,7 +40,7 @@ cargo test --features "serde zkvm"   # test with serde + zkvm features
 # Run CLI tools
 cargo run -p proveno-compiler -- source.lua compiled.json
 cargo run -p proveno-prover   -- compiled.json dry_result.json
-cargo run -p proveno-orchestrator -- "natural language task"
+cargo run -p proveno-proveno-orchestrator -- "natural language task"
 
 # Noir prove/verify benchmark (drives the full nargo+bb pipeline; prints prove/verify wall time)
 # Requires `nargo` and `bb` on PATH.
@@ -104,9 +104,9 @@ cargo run -p proveno-prover -- compiled.json dry_result.json
 # 3. Generate the Noir UltraHonk proof
 cargo run -p proveno-noir -- compiled.json dry_result.json --prove
 
-# 1+2+3 in one shot: orchestrator --prove also invokes proveno-noir and prints the
+# 1+2+3 in one shot: proveno-orchestrator --prove also invokes proveno-noir and prints the
 # proof bytes + canonical bytes32[] public inputs ready for on-chain submission.
-cargo run -p proveno-orchestrator -- "<task>" --prove
+cargo run -p proveno-proveno-orchestrator -- "<task>" --prove
 
 # 4. Submit on chain to ProvenoConsumer.consumeResult (or ProvenoVerifier.verify).
 #    The demo script handles the full LLM -> proof -> chain flow locally.

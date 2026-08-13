@@ -136,7 +136,7 @@ require_cmd python3
 
 [[ -n "${LUA_SOURCE:-}" && ! -f "$LUA_SOURCE" ]] && die "LUA_SOURCE='$LUA_SOURCE' not found"
 
-# ANTHROPIC_API_KEY is only needed for the orchestrator (LLM) generation path.
+# ANTHROPIC_API_KEY is only needed for the proveno-orchestrator (LLM) generation path.
 # With LUA_SOURCE set (the default), step 1 compiles a fixed Lua file — no LLM.
 [[ -z "${LUA_SOURCE:-}" && -z "${ANTHROPIC_API_KEY:-}" ]] && \
     die "ANTHROPIC_API_KEY must be set (or set LUA_SOURCE to skip the LLM)"
@@ -184,7 +184,7 @@ if [[ -n "${LUA_SOURCE:-}" ]]; then
         > "$ORCH_JSON"
 else
     step "[1/5] Generate the proof via the orchestrator (LLM)"
-    cargo run --quiet -p proveno-orchestrator -- \
+    cargo run --quiet -p proveno-proveno-orchestrator -- \
         "$TASK" \
         --prove \
         --json \

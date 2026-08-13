@@ -35,7 +35,7 @@ fn main() {
             }
             Some("--prove") => do_prove = true,
             // Emit the proof + 8-element bytes32[] public inputs as JSON on
-            // stdout (same shape the orchestrator's --json prove path prints),
+            // stdout (same shape the proveno-orchestrator's --json prove path prints),
             // so scripts can feed them to on-chain verification. Implies --prove.
             Some("--json") => {
                 as_json = true;

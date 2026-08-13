@@ -6,7 +6,7 @@ default-run = "proveno-orchestrator"
 
 [dependencies]
 proveno = { path = "..", features = ["serde", "std", "zkvm"] }
-proveno_prover = { path = "../prover" }
+proveno-prover = { path = "../proveno-prover" }
 proveno-noir = { path = "../proveno-noir" }
 proveno-verifier = { path = "../verifier" }
 serde = { version = "1", features = ["derive"] }

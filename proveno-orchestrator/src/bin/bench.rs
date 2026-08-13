@@ -4,7 +4,7 @@
 //! under the `template_price_feed_v1` policy, builds a wire-format proof bundle,
 //! and prints everything needed for the on-chain submission step.
 //!
-//! Usage: cargo run -p proveno-orchestrator --bin bench
+//! Usage: cargo run -p proveno-proveno-orchestrator --bin bench
 
 use std::time::Instant;
 
@@ -118,7 +118,7 @@ return r.status
     // Execute with live HTTP + policy enforcement, compute public inputs
     eprintln!("[2/4] Executing with live HTTP call to httpbin.org...");
     let t0 = Instant::now();
-    let prover = Prover::new(VmConfig::default(), BenchHost::new(), vec![]);
+    let prover = Prover::new(VmConfig::default(), BenchHost::new());
     let dry_run_result = prover
         .dry_run_with_policy(&program.into(), LuaValue::Nil, vec![], &policy)
         .expect("dry run failed");

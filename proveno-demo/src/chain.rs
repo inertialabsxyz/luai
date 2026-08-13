@@ -241,7 +241,7 @@ fn locate_proveno_root() -> Result<PathBuf, ChainError> {
     }
 }
 
-/// Read the current policy hash that the orchestrator's prove pipeline commits
+/// Read the current policy hash that the proveno-orchestrator's prove pipeline commits
 /// to. Phase 2 stubs `policy_hash` as all-zeros (see
 /// `proveno::zkvm::commitment::compute_public_inputs`), so the deployed
 /// `expectedPolicyHash` must also be zero for `ProvenoVerifier.verify` to pass.

@@ -86,7 +86,7 @@ verifier. After such a change you **must** do all three of the following:
 3. Update `PublicInputsLib.pack` so each scalar / `[u8; 32]` field is written
    into the `bytes32[]` at the same offset that `bb prove -t evm` produces.
 
-The Rust-side `bytes32[]` ordering in `orchestrator/src/prove.rs`
+The Rust-side `bytes32[]` ordering in `../proveno-orchestrator/src/prove.rs`
 (`build_proof_artifacts_with_noir`) and any test fixtures under
 `contracts/test/fixtures/` must be regenerated to match.
 

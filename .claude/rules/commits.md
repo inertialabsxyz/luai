@@ -8,7 +8,7 @@
 
 - `type` — `feat`, `fix`, `refactor`, `test`, `docs`, `chore`
 - `scope` — the crate or module. Common scopes:
-  - Crates: `compiler`, `prover`, `orchestrator`, `openvm`, `zkvm`
+  - Crates: `compiler`, `prover`, `proveno-orchestrator`, `openvm`, `zkvm`
   - Core modules: `parser`, `bytecode`, `vm`, `host`, `tls`, `types`
   - Cross-cutting: `tests`, `docs`, `repo`, `planning`, `ci`
 - Description — imperative, lowercase, no period. 72 characters total max.

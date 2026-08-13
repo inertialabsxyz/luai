@@ -425,7 +425,7 @@ return 1"#;
         );
     }
 
-    /// Exercises the full Noir proving path through the orchestrator helper.
+    /// Exercises the full Noir proving path through the proveno-orchestrator helper.
     /// Requires `nargo` and `bb` on `PATH`; gated behind the
     /// `noir-prove` feature so default CI runs skip it.
     #[test]
@@ -461,7 +461,7 @@ return 1"#;
 return r.message"#;
         let program = pipeline::compile_and_verify(source).unwrap();
 
-        // Path 1: orchestrator post-hoc (no TLS attestations)
+        // Path 1: proveno-orchestrator post-hoc (no TLS attestations)
         let output =
             pipeline::execute(&program, LuaValue::Nil, VmConfig::default(), StubHost).unwrap();
         let oracle_tape = OracleTape::from_records(&output.transcript);
@@ -469,7 +469,7 @@ return r.message"#;
             compute_public_inputs(program.program_hash, &LuaValue::Nil, &oracle_tape, &output);
 
         // Path 2: prover dry_run (no TLS attestations)
-        let prover = Prover::new(VmConfig::default(), StubHost, vec!["echo".into()]);
+        let prover = Prover::new(VmConfig::default(), StubHost);
         let dry = prover.dry_run(&program, LuaValue::Nil, vec![]).unwrap();
         let pi_prover = dry.public_inputs;
 

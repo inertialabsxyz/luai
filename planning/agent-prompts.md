@@ -556,18 +556,18 @@ The `proveno-orchestrator` crate currently: accepts a natural-language task, sen
 ### Verification
 
 ```bash
-cargo build -p proveno-orchestrator
+cargo build -p proveno-proveno-orchestrator
 # → compiles without errors
 
 cargo test
 # → all tests pass
 
-cargo run -p proveno-orchestrator -- --template price_feed_v1 "get BTC/USD from coingecko and cryptocompare"
+cargo run -p proveno-proveno-orchestrator -- --template price_feed_v1 "get BTC/USD from coingecko and cryptocompare"
 # → prints extracted params JSON
 # → prints assembled Lua
 # → (if ANTHROPIC_API_KEY is set) executes and returns a price result
 
-cargo run -p proveno-orchestrator -- --template price_feed_v1 "get price from unapproved.com"
+cargo run -p proveno-proveno-orchestrator -- --template price_feed_v1 "get price from unapproved.com"
 # → prints a clear rejection message, exits non-zero
 ```
 
@@ -700,16 +700,16 @@ All of Phases 1–4 are complete:
 ### Verification
 
 ```bash
-cargo build -p proveno-orchestrator
+cargo build -p proveno-proveno-orchestrator
 # → compiles without errors
 
 cargo test
 # → all tests pass
 
-docker build -t proveno-orchestrator .
+docker build -t proveno-proveno-orchestrator .
 # → image builds successfully
 
-docker run -e ANTHROPIC_API_KEY=test -e PROVENO_API_KEYS=testkey -p 8080:8080 proveno-orchestrator &
+docker run -e ANTHROPIC_API_KEY=test -e PROVENO_API_KEYS=testkey -p 8080:8080 proveno-proveno-orchestrator &
 curl -s http://localhost:8080/healthz
 # → HTTP 200
 

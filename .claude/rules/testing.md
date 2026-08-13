@@ -59,7 +59,7 @@ fn replay_produces_identical_output_hash() {
 }
 ```
 
-Workspace crates (`compiler`, `prover`, `orchestrator`, `openvm`) carry their own tests next to their sources; `cargo test` at the root runs everything.
+Workspace crates (`compiler`, `prover`, `proveno-orchestrator`, `openvm`) carry their own tests next to their sources; `cargo test` at the root runs everything.
 
 ## Feature-gated tests
 

@@ -1047,7 +1047,7 @@ fn json_decode(
 /// string. The VM is integer-only, so `json.decode` rejects fractional /
 /// exponent numbers; this variant lets Lua programs receive the verbatim
 /// number text and decide how to interpret it (typically via the
-/// split-on-dot-then-scale idiom documented in the orchestrator system prompt).
+/// split-on-dot-then-scale idiom documented in the proveno-orchestrator system prompt).
 fn json_decode_strings(
     args: &[LuaValue],
     gas: &mut GasMeter,

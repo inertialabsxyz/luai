@@ -178,7 +178,7 @@ cargo run -p proveno-verifier --bin policy-hash
 bash zkvm-prove.sh examples/prover.lua template_price_feed_v1
 
 # Or: generate proof bundle via bench binary (dry-run only, no ZK proving)
-cargo run -p proveno-orchestrator --bin bench
+cargo run -p proveno-proveno-orchestrator --bin bench
 
 # 3. Start local testnet
 anvil --port 8545 --block-time 1 &

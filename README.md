@@ -92,7 +92,7 @@ provenance when a provider is attached (see "Two guarantees, one proof" above).
 | `compiler` | CLI: compile Lua source → verified bytecode JSON |
 | `prover` | CLI: dry-run compiled programs, produce oracle tapes and public inputs |
 | `proveno-noir` | Noir witness writer + `nargo`/`bb` driver — the canonical proving path |
-| `orchestrator` | LLM-driven agentic pipeline — accepts a task, generates and executes Lua |
+| `proveno-orchestrator` | LLM-driven agentic pipeline — accepts a task, generates and executes Lua |
 
 > Noir is the canonical proving path. The historical OpenVM implementation has been
 > archived on the `archive/openvm` branch — see that branch for the previous guest,
@@ -170,7 +170,7 @@ End-to-end demo against a local anvil chain. Requires `nargo`, `bb`, `forge`,
 
 ```bash
 # 1. (one terminal) build everything once so the demo doesn't time out on cargo
-cargo build --release -p proveno-orchestrator -p proveno-noir
+cargo build --release -p proveno-proveno-orchestrator -p proveno-noir
 
 # 2. (second terminal) run the demo — spins up a temporary anvil, deploys the
 #    HonkVerifier/ProvenoVerifier/ProvenoConsumer triple, generates a Noir proof for

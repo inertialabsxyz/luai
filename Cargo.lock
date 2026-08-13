@@ -3533,7 +3533,7 @@ name = "proveno-noir"
 version = "0.1.0"
 dependencies = [
  "proveno",
- "proveno_prover",
+ "proveno-prover",
  "serde_json",
 ]
 
@@ -3545,8 +3545,8 @@ dependencies = [
  "dotenvy",
  "proveno",
  "proveno-noir",
+ "proveno-prover",
  "proveno-verifier",
- "proveno_prover",
  "reqwest",
  "serde",
  "serde_json",
@@ -3555,21 +3555,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "proveno-verifier"
-version = "0.1.0"
-dependencies = [
- "proveno",
- "sha2",
-]
-
-[[package]]
-name = "proveno_prover"
+name = "proveno-prover"
 version = "0.1.0"
 dependencies = [
  "proveno",
  "reqwest",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "proveno-verifier"
+version = "0.1.0"
+dependencies = [
+ "proveno",
+ "sha2",
 ]
 
 [[package]]

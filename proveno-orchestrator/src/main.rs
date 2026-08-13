@@ -3,7 +3,7 @@ use proveno::{types::value::LuaValue, vm::engine::VmConfig};
 use proveno_orchestrator::{llm, pipeline, prompt, prove, tools};
 
 #[derive(Parser)]
-#[command(name = "proveno-orchestrator")]
+#[command(name = "proveno-proveno-orchestrator")]
 #[command(about = "LLM-driven agentic pipeline for the Proveno VM")]
 struct Cli {
     /// The task to accomplish (natural language)

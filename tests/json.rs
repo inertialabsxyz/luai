@@ -365,7 +365,7 @@ fn json_decode_strings_split_on_dot_integerization_integration() {
     // End-to-end smoke test of the recommended integerization recipe: decode
     // the verbatim string, split on the dot, scale, recombine, tonumber.
     // Pins that decode_strings hands back exactly the text needed to feed the
-    // split-on-dot pattern documented in the orchestrator prompt.
+    // split-on-dot pattern documented in the proveno-orchestrator prompt.
     assert_returns_int(
         r#"
         local raw = json.decode_strings("3.14")

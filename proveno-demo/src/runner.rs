@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn parse_i64_bytes32_handles_negative() {
-        // Two's-complement -1 packed by `i64_to_bytes32_hex` in the orchestrator.
+        // Two's-complement -1 packed by `i64_to_bytes32_hex` in the proveno-orchestrator.
         let v =
             parse_i64_bytes32("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
                 .unwrap();
