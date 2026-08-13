@@ -16,16 +16,14 @@ pub use proveno::zkvm::dry_run_result::DryRunResult;
 pub struct Prover<H: HostInterface> {
     config: VmConfig,
     host: H,
-    _tool_names: Vec<String>,
 }
 
 impl<H: HostInterface> Prover<H> {
     /// Create a new prover with the given VM config, live host, and registered tool names.
-    pub fn new(config: VmConfig, host: H, tool_names: Vec<String>) -> Self {
+    pub fn new(config: VmConfig, host: H) -> Self {
         Prover {
             config,
             host,
-            _tool_names: tool_names,
         }
     }
 
@@ -120,7 +118,7 @@ mod tests {
         let policy = constrained_http_v1();
         let expected_hash = policy.policy_hash();
 
-        let prover = Prover::new(VmConfig::default(), ProverHost::new(), vec![]);
+        let prover = Prover::new(VmConfig::default(), ProverHost::new());
         let result = prover
             .dry_run_with_policy(&program.into(), LuaValue::Nil, vec![], &policy)
             .expect("dry_run_with_policy failed");
