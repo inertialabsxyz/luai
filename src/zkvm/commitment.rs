@@ -128,7 +128,6 @@ pub fn compute_public_inputs(
 ///
 /// Use this variant when running under a real `OraclePolicy`. The hash is
 /// stable: same policy struct → same bytes on any machine.
-#[cfg(feature = "std")]
 pub fn compute_public_inputs_with_policy(
     program_hash: [u8; 32],
     input_value: &LuaValue,
@@ -261,7 +260,6 @@ mod tests {
         assert_eq!(pi.policy_hash, [0u8; 32]);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn compute_public_inputs_with_policy_nonzero_hash() {
         use crate::policy::profiles::constrained_http_v1;
@@ -276,7 +274,6 @@ mod tests {
         assert_eq!(pi.policy_hash, policy.policy_hash());
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn compute_public_inputs_with_policy_hash_stable() {
         use crate::policy::profiles::template_price_feed_v1;

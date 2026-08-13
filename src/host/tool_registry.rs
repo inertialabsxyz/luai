@@ -21,7 +21,6 @@ pub struct ToolRegistry<H: HostInterface> {
     calls_made: usize,
     total_bytes_in: usize,
     total_bytes_out: usize,
-    #[cfg(feature = "std")]
     policy: Option<crate::policy::OraclePolicy>,
 }
 
@@ -32,14 +31,12 @@ impl<H: HostInterface> ToolRegistry<H> {
             calls_made: 0,
             total_bytes_in: 0,
             total_bytes_out: 0,
-            #[cfg(feature = "std")]
             policy: None,
         }
     }
 
     /// Create a registry with an attached policy. Tool calls are checked against
     /// the policy's domain allowlist, method restriction, and response schemas.
-    #[cfg(feature = "std")]
     pub fn with_policy(host: H, policy: crate::policy::OraclePolicy) -> Self {
         ToolRegistry {
             host,
@@ -92,7 +89,6 @@ impl<H: HostInterface> ToolRegistry<H> {
         }
 
         // 4. Policy: HTTP method and domain allowlist checks.
-        #[cfg(feature = "std")]
         if let Some(ref policy) = self.policy
             && is_http_tool(name)
         {
@@ -128,7 +124,6 @@ impl<H: HostInterface> ToolRegistry<H> {
                 }
 
                 // 7c. Policy: response schema validation.
-                #[cfg(feature = "std")]
                 if let Some(ref policy) = self.policy
                     && is_http_tool(name)
                 {
@@ -180,7 +175,6 @@ fn is_http_tool(name: &str) -> bool {
 }
 
 /// Extract the `url` string from a LuaTable args argument.
-#[cfg(feature = "std")]
 fn get_url_from_args(args: &LuaTable) -> Option<String> {
     let key = LuaKey::String(LuaString::from_str("url"));
     match args.get(&key) {
@@ -418,8 +412,7 @@ mod tests {
         let record = &transcript.records()[0];
         assert!(record.gas_charged >= gas_cost::TOOL_CALL_BASE);
     }
-
-    #[cfg(feature = "std")]
+    
     mod policy_tests {
         use super::*;
         use crate::policy::{OraclePolicy, TlsRequirement};

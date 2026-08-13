@@ -1,16 +1,4 @@
-#[cfg(feature = "std")]
 use std::{cell::RefCell, rc::Rc, sync::Arc};
-#[cfg(not(feature = "std"))]
-use {
-    alloc::{
-        rc::Rc,
-        string::{String, ToString},
-        sync::Arc,
-        vec::Vec,
-    },
-    core::cell::RefCell,
-};
-
 use crate::types::table::{LuaKey, LuaTable};
 pub const MAX_TABLE_ENTRIES: usize = 50_000;
 

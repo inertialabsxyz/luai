@@ -1,17 +1,4 @@
-#[cfg(feature = "std")]
 use std::{cell::RefCell, rc::Rc};
-#[cfg(not(feature = "std"))]
-use {
-    alloc::{
-        boxed::Box,
-        format,
-        rc::Rc,
-        string::{String, ToString},
-        vec,
-        vec::Vec,
-    },
-    core::cell::RefCell,
-};
 
 use crate::{
     compiler::proto::{CompiledProgram, Constant, Instruction, UpvalueDesc},
@@ -209,7 +196,6 @@ impl<H: HostInterface> Vm<H> {
 
     /// Create a VM with an attached `OraclePolicy`. Tool calls are checked
     /// against the policy's domain allowlist, method restriction, and schemas.
-    #[cfg(feature = "std")]
     pub fn new_with_policy(config: VmConfig, host: H, policy: crate::policy::OraclePolicy) -> Self {
         let gas = GasMeter::new(config.gas_limit);
         let mem = MemoryMeter::new(config.memory_limit_bytes);

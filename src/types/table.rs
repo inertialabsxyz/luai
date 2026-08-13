@@ -1,7 +1,4 @@
 use crate::types::value::{LuaError, LuaString, LuaValue, MAX_TABLE_ENTRIES};
-#[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
-#[cfg(feature = "std")]
 use std::collections::BTreeMap;
 
 //
