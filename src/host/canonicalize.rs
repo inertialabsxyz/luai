@@ -203,7 +203,6 @@ fn deser_string(s: &[u8]) -> Result<(Vec<u8>, &[u8]), CanonError> {
 /// Parse a JSON array (starting after the opening `[`).
 fn deser_array(s: &[u8]) -> Result<(LuaValue, &[u8]), CanonError> {
     use crate::types::table::{LuaKey, LuaTable};
-    #[cfg(feature = "std")]
     use std::{cell::RefCell, rc::Rc};
 
     let mut t = LuaTable::new();
@@ -234,7 +233,6 @@ fn deser_array(s: &[u8]) -> Result<(LuaValue, &[u8]), CanonError> {
 fn deser_object(s: &[u8]) -> Result<(LuaValue, &[u8]), CanonError> {
     use crate::types::table::{LuaKey, LuaTable};
     use crate::types::value::LuaString;
-    #[cfg(feature = "std")]
     use std::{cell::RefCell, rc::Rc};
 
     let mut t = LuaTable::new();

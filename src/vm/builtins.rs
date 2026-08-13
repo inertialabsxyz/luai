@@ -3,19 +3,7 @@
 //! All builtins are dispatched through [`call_builtin`]. Gas and memory are
 //! metered via the passed-in [`GasMeter`] and [`MemoryMeter`].
 
-#[cfg(feature = "std")]
 use std::{cell::RefCell, rc::Rc};
-#[cfg(not(feature = "std"))]
-use {
-    alloc::{
-        format,
-        rc::Rc,
-        string::{String, ToString},
-        vec,
-        vec::Vec,
-    },
-    core::cell::RefCell,
-};
 
 use crate::{
     types::{
