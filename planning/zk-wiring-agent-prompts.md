@@ -108,10 +108,10 @@ The relevant functions are in `src/zkvm/commitment.rs`:
 cargo test
 # → all tests pass including the new dry_run_with_policy test
 
-cargo run -p proveno-prover -- examples/prover.lua /tmp/dry_result_no_policy.json
+cargo run -p proveno-witness -- examples/prover.lua /tmp/dry_result_no_policy.json
 # → writes dry_result_no_policy.json with policy_hash = "0000...0000"
 
-cargo run -p proveno-prover -- examples/prover.lua /tmp/dry_result_with_policy.json \
+cargo run -p proveno-witness -- examples/prover.lua /tmp/dry_result_with_policy.json \
   --policy constrained_http_v1
 # → writes dry_result_with_policy.json; python3 -c "import json; d=json.load(open('/tmp/dry_result_with_policy.json')); print(d['public_inputs']['policy_hash'])" shows non-zero hex
 

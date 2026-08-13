@@ -39,7 +39,7 @@ cargo test --features "serde zkvm"   # test with serde + zkvm features
 
 # Run CLI tools
 cargo run -p proveno-compiler -- source.lua compiled.json
-cargo run -p proveno-prover   -- compiled.json dry_result.json
+cargo run -p proveno-witness   -- compiled.json dry_result.json
 cargo run -p proveno-proveno-orchestrator -- "natural language task"
 
 # Noir prove/verify benchmark (drives the full nargo+bb pipeline; prints prove/verify wall time)
@@ -55,7 +55,7 @@ There is no separate lint command; `cargo test` exercises the full suite includi
 |---|---|
 | `proveno` (root) | Core library: parser, compiler, bytecode, VM, host |
 | `proveno-compiler` | CLI: compiles Lua source → verified bytecode JSON |
-| `proveno-prover` | CLI: dry-runs bytecode, produces oracle tape + public inputs |
+| `proveno-witness` | CLI: dry-runs bytecode, produces oracle tape + public inputs |
 | `proveno-orchestrator` | LLM-driven agent loop (Claude API + live tool execution; `--prove` runs the full Noir pipeline) |
 | `proveno-noir` | Noir witness writer + `nargo`/`bb` prover driver (canonical proving path) |
 | `proveno-verifier` | Small helper binaries (e.g. `policy-hash` prints the canonical policy commitment) |
@@ -99,7 +99,7 @@ local-anvil wrapper `demo-noir-e2e-local.sh`).
 cargo run -p proveno-compiler -- source.lua compiled.json
 
 # 2. Dry-run with the live host -> oracle tape + public inputs
-cargo run -p proveno-prover -- compiled.json dry_result.json
+cargo run -p proveno-witness -- compiled.json dry_result.json
 
 # 3. Generate the Noir UltraHonk proof
 cargo run -p proveno-noir -- compiled.json dry_result.json --prove

@@ -2,7 +2,7 @@ use std::{env, fs, path::PathBuf};
 
 use proveno::compiler::CompiledProgram;
 use proveno_noir::{ProveOptions, prove_from_artifacts};
-use proveno_prover::prover::DryRunResult;
+use proveno_witness::prover::DryRunResult;
 
 fn main() {
     let mut args = env::args().skip(1);

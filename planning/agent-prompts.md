@@ -62,7 +62,7 @@ proveno is a deterministic, sandboxed Lua VM designed for agentic workloads. The
 - `src/zkvm/commitment.rs` — `PublicInputs` (program_hash, input_hash, tool_responses_hash, output_hash, tls_attestation_hash)
 - `src/zkvm/guest_input.rs` — `GuestInput` for OpenVM
 - `proveno-openvm/` — OpenVM guest + encoder for zk proof generation
-- `proveno-prover/` — CLI: dry-runs compiled programs, records oracle tape and public inputs
+- `../proveno-witness/` — CLI: dry-runs compiled programs, records oracle tape and public inputs
 
 TLS attestation is structurally present but incomplete: P-256 ECDSA signature verification and Mozilla root CA pinning are not yet implemented. The `tls_attestation_hash` in `PublicInputs` is currently zero for all executions.
 
@@ -72,7 +72,7 @@ TLS attestation is structurally present but incomplete: P-256 ECDSA signature ve
 
 **Part A — Close the TLS attestation gaps** as specified in `planning/programmable-oracle-mvp-plan.md` under "Phase 1: Finish Proof Integrity":
 
-1. Locate the TLS verification code in `proveno-openvm/` and `proveno-prover/`. Understand exactly where P-256 ECDSA verification is called and where it falls short.
+1. Locate the TLS verification code in `proveno-openvm/` and `../proveno-witness/`. Understand exactly where P-256 ECDSA verification is called and where it falls short.
 2. Implement full P-256 ECDSA signature verification in the zkVM verification path. The signature check must run inside the guest (i.e. be part of the proof) not just in the prover host.
 3. Implement Mozilla root CA pinning. Embed the Mozilla root set as a static constant — do not fetch it at runtime. Reject certificate chains that do not terminate in the pinned set.
 4. Add graceful handling for non-P256 servers: execution must not panic or produce a malformed proof. Instead, `tls_attestation_hash` must be zero and the host must surface a clear degradation signal.
@@ -348,13 +348,13 @@ Phases 1, 2, and 3 (library + contracts) are complete:
 Deploy to testnet and record benchmark numbers as specified in `planning/programmable-oracle-mvp-plan.md` under "Phase 3: Validate On-Chain Viability":
 
 1. Deploy `ProvenoVerifier.sol` to Sepolia testnet with a known policy hash (use `template_price_feed_v1().policy_hash()` from `src/policy/profiles.rs`).
-2. Generate a real proof using `proveno-prover` with a live HTTPS task (a simple `http_get` to an approved endpoint is sufficient).
+2. Generate a real proof using `proveno-witness` with a live HTTPS task (a simple `http_get` to an approved endpoint is sufficient).
 3. Submit the proof to the deployed contract and confirm the transaction succeeds.
 4. Submit a proof with a different policy hash and confirm the transaction reverts with `PolicyHashMismatch()`.
 5. Measure and record:
    - Proof size in bytes
    - Gas used for `ProvenoVerifier.verify`
-   - End-to-end latency: time from `proveno-prover` invocation to proof available
+   - End-to-end latency: time from `proveno-witness` invocation to proof available
 6. Record everything in `planning/phase3-benchmarks.md`:
    - Deployed contract addresses (Sepolia)
    - Transaction hashes for the passing and rejecting submissions
@@ -403,7 +403,7 @@ Phases 1–3 are complete:
 - Phase 2: `OraclePolicy` with `policy_hash`. `template_price_feed_v1()` profile exists in `src/policy/profiles.rs` but has placeholder empty fields for `allowed_domains` and `schema_versions` (marked `// Phase 4 stub`).
 - Phase 3: `proveno-verifier` and Solidity contracts deployed to Sepolia testnet. Gas and proof size pass thresholds (see `planning/phase3-benchmarks.md`).
 
-The VM accepts Lua programs via `proveno-compiler` → `proveno-prover` pipeline. `tool.call(name, args)` invokes registered tools. `http_get(url)` returns `{status, body}` where `body` is a JSON string. `json.decode(body)` parses it into a Lua table.
+The VM accepts Lua programs via `proveno-compiler` → `proveno-witness` pipeline. `tool.call(name, args)` invokes registered tools. `http_get(url)` returns `{status, body}` where `body` is a JSON string. `json.decode(body)` parses it into a Lua table.
 
 `cargo test` passes and must continue to pass.
 

@@ -7,7 +7,7 @@ use proveno::{
     TapeHost, Vm, VmConfig, compiler::CompiledProgram, noir::encoder::encode_program,
     types::value::LuaValue,
 };
-use proveno_prover::prover::DryRunResult;
+use proveno_witness::prover::DryRunResult;
 
 pub use prover::{NoirProof, NoirProver, NoirPublicInputs, ProveError};
 pub use witness::{NoirWitness, WitnessError, build_witness, write_prover_toml};

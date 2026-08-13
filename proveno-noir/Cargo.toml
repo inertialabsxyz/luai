@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 proveno = { path = "..", features = ["zkvm", "serde"] }
-proveno-prover = { path = "../proveno-prover" }
+proveno-witness = { path = "../proveno-witness" }
 serde_json = "1"
 
 [dev-dependencies]

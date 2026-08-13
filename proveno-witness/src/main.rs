@@ -29,7 +29,7 @@ fn main() {
         }),
         None => {
             eprintln!(
-                "Usage: proveno-prover <compiled.json> [output.json] [--policy constrained_http_v1|template_price_feed_v1]"
+                "Usage: proveno-witness <compiled.json> [output.json] [--policy constrained_http_v1|template_price_feed_v1]"
             );
             return;
         }
