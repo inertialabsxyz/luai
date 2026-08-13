@@ -1,1 +1,1 @@
-cargo run -p proveno-noir -- compiled.json dry_result.json --prove
+cargo run -p proveno-noir -- /tmp/compiled.json /tmp/dry_result.json --prove
