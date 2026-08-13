@@ -445,7 +445,7 @@ cargo test --test template
 # → test price_feed_v1_returns_correct_shape ... ok
 # → test price_feed_v1_rejects_high_deviation ... ok
 
-cargo build -p proveno-compiler
+cargo build -p proveno-proveno-compiler
 # → compiles without errors
 ```
 
@@ -627,7 +627,7 @@ cargo fuzz build
 # → all fuzz targets compile
 
 cargo fuzz run parser -- -max_total_time=60
-cargo fuzz run compiler -- -max_total_time=60
+cargo fuzz run proveno-compiler -- -max_total_time=60
 cargo fuzz run verifier -- -max_total_time=60
 cargo fuzz run host_boundary -- -max_total_time=60
 # → each runs without finding panics

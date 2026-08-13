@@ -236,11 +236,11 @@ fn test_tool_call() {
 #[test]
 fn test_tool_as_value_error() {
     use proveno::compiler::CompileError;
-    // local t = tool  → parser or compiler should reject
+    // local t = tool  → parser or proveno-compiler should reject
     // The parser already rejects `local t = tool`, so try a different form
-    // that reaches the compiler.
+    // that reaches the proveno-compiler.
     // `tool` used in an expression via a workaround the parser misses is hard
-    // to trigger since the parser is strict.  We test what the compiler catches:
+    // to trigger since the parser is strict.  We test what the proveno-compiler catches:
     // passing tool.call as a value.
     let block = parse("local f = tool.call").expect("parse ok");
     let err = compile(&block).expect_err("should fail");

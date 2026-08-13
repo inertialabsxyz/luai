@@ -668,8 +668,8 @@ impl Parser {
     /// - `tool.<anything-other-than-call>` is a compile error.
     /// - `tool.call` followed by `(` is emitted as a regular Call AST node.
     /// - `tool.call` NOT followed by `(` is allowed as a parsed expression so
-    ///   the compiler can handle the `pcall(tool.call, ...)` special form (§3.4).
-    ///   The compiler (Phase 4) will reject any other use of `tool.call` as a value.
+    ///   the proveno-compiler can handle the `pcall(tool.call, ...)` special form (§3.4).
+    ///   The proveno-compiler (Phase 4) will reject any other use of `tool.call` as a value.
     fn parse_tool_or_error(&mut self, tool_span: Span) -> Result<Expr, ParseError> {
         // Must be followed by `.`
         if !self.check(&Token::Dot) {
@@ -696,7 +696,7 @@ impl Parser {
                     }))
                 } else {
                     // `tool.call` as a reference (e.g. argument to pcall).
-                    // Accepted syntactically; the compiler validates context.
+                    // Accepted syntactically; the proveno-compiler validates context.
                     Ok(Expr::Field(
                         Box::new(Expr::Name("tool".into(), tool_span)),
                         "call".into(),

@@ -601,7 +601,7 @@ impl<H: HostInterface> Vm<H> {
             Instruction::And(offset) => {
                 // Short-circuit: if top is falsy, jump past RHS (leave falsy
                 // on stack as the result).  If truthy, fall through — the
-                // compiler emits a Pop to discard the LHS before evaluating
+                // proveno-compiler emits a Pop to discard the LHS before evaluating
                 // the RHS.
                 let top = self
                     .stack
@@ -617,7 +617,7 @@ impl<H: HostInterface> Vm<H> {
             Instruction::Or(offset) => {
                 // Short-circuit: if top is truthy, jump past RHS (leave truthy
                 // on stack as the result).  If falsy, fall through — the
-                // compiler emits a Pop to discard the LHS before evaluating
+                // proveno-compiler emits a Pop to discard the LHS before evaluating
                 // the RHS.
                 let top = self
                     .stack

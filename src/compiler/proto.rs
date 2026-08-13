@@ -114,7 +114,7 @@ pub enum UpvalueDesc {
     Upvalue(u8),
 }
 
-/// The output of the compiler: all function prototypes + a program hash.
+/// The output of the proveno-compiler: all function prototypes + a program hash.
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CompiledProgram {

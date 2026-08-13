@@ -7,7 +7,7 @@
 #
 # Deterministic and fast (~3-4s prove). Requires `nargo` and `bb` on PATH.
 #
-# Recording tip: run `cargo build -p proveno-compiler -p proveno_prover \
+# Recording tip: run `cargo build -p proveno-proveno-compiler -p proveno_prover \
 #   -p proveno-noir` once first, so `cargo run --quiet` does NOT recompile (and
 #   therefore prints no warnings) during the take.
 

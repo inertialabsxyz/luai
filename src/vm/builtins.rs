@@ -82,7 +82,7 @@ pub fn call_builtin(
         // treat log here for consistency.
     }
     // Note: log and error have their own dedicated opcodes (Instruction::Log /
-    // Instruction::Error) and are NOT routed through call_builtin.  The compiler
+    // Instruction::Error) and are NOT routed through call_builtin.  The proveno-compiler
     // emits those opcodes directly when it recognises `log(...)` / `error(...)`.
     // The `logs` parameter is only passed in to make the signature consistent for
     // possible future use.

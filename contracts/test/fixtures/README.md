@@ -24,7 +24,7 @@ Run from the repo root. Requires the pinned toolchain on `PATH`: `nargo`
 echo 'return 42' > /tmp/proveno-fixture/simple.lua
 
 # 2. Compile -> bytecode JSON
-cargo run -p proveno-compiler -- /tmp/proveno-fixture/simple.lua /tmp/proveno-fixture/compiled.json
+cargo run -p proveno-proveno-compiler -- /tmp/proveno-fixture/simple.lua /tmp/proveno-fixture/compiled.json
 
 # 3. Dry-run -> oracle tape + public inputs JSON
 cargo run -p proveno_prover -- /tmp/proveno-fixture/compiled.json /tmp/proveno-fixture/dry_result.json

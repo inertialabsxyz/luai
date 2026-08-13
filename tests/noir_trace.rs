@@ -27,7 +27,7 @@ fn compile_program(src: &str) -> proveno::compiler::proto::CompiledProgram {
 #[test]
 fn trace_length_matches_instruction_count() {
     // "return 1 + 2" dispatches exactly 4 instructions: PushK, PushK, Add, Ret.
-    // The compiler appends an unreachable fallback instruction after an explicit
+    // The proveno-compiler appends an unreachable fallback instruction after an explicit
     // return, so code.len() == 5; only the 4 reachable ones produce trace steps.
     let program = compile_program("return 1 + 2");
     let mut vm = make_vm(true);

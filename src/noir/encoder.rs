@@ -43,8 +43,8 @@ pub fn encode_program(program: &CompiledProgram) -> Result<NoirBytecode, EncodeE
         }
     }
 
-    // The compiler already stores the Poseidon2 program hash on CompiledProgram
-    // at compile time (see crate::compiler::program_hash). It is byte-identical
+    // The proveno-compiler already stores the Poseidon2 program hash on CompiledProgram
+    // at compile time (see crate::proveno-compiler::program_hash). It is byte-identical
     // to what the circuit recomputes over (opcodes, operands), so we reuse it
     // here rather than hash twice — that guarantees there is exactly one
     // definition of "the program hash" in the Rust tree.

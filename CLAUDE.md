@@ -30,7 +30,7 @@ cargo build -p proveno                  # core library only
 # Test
 cargo test                           # all tests
 cargo test --lib                     # unit tests only (fast)
-cargo test --test integration        # one integration file (also: builtins, compiler, json, tools)
+cargo test --test integration        # one integration file (also: builtins, proveno-compiler, json, tools)
 cargo test --lib engine              # filter by name within unit tests
 
 # Feature-gated builds
@@ -38,7 +38,7 @@ cargo build --features zkvm          # enable zkvm module
 cargo test --features "serde zkvm"   # test with serde + zkvm features
 
 # Run CLI tools
-cargo run -p proveno-compiler -- source.lua compiled.json
+cargo run -p proveno-proveno-compiler -- source.lua compiled.json
 cargo run -p proveno-witness   -- compiled.json dry_result.json
 cargo run -p proveno-proveno-orchestrator -- "natural language task"
 
@@ -96,7 +96,7 @@ local-anvil wrapper `demo-noir-e2e-local.sh`).
 
 ```bash
 # 1. Compile Lua source -> verified bytecode JSON
-cargo run -p proveno-compiler -- source.lua compiled.json
+cargo run -p proveno-proveno-compiler -- source.lua compiled.json
 
 # 2. Dry-run with the live host -> oracle tape + public inputs
 cargo run -p proveno-witness -- compiled.json dry_result.json
@@ -143,7 +143,7 @@ Lua source
 ### Key modules in `src/`
 
 - **`parser/`** — Lexer and recursive-descent parser. Disallows `require`, `os`, `io`, and other unsafe constructs at parse time. `tool.call()` is a first-class syntax node.
-- **`compiler/`** — `codegen.rs` compiles AST to `Instruction` bytecode. `proto.rs` defines `FunctionProto`, `Instruction`, `Constant`. `mod.rs` exposes `compile()` and `canonical_hash()`.
+- **`proveno-compiler/`** — `codegen.rs` compiles AST to `Instruction` bytecode. `proto.rs` defines `FunctionProto`, `Instruction`, `Constant`. `mod.rs` exposes `compile()` and `canonical_hash()`.
 - **`bytecode/`** — `Instruction` enum and `verifier.rs`. The verifier performs a single-pass stack-depth check across all control-flow paths before any instruction executes.
 - **`vm/engine.rs`** — `Vm` struct and the main execution loop. Manages `CallFrame` stack, resolves builtins from sentinel strings, dispatches `ToolCall` through `ToolRegistry`.
 - **`vm/builtins.rs`** — All standard library functions (`string.*`, `math.*`, `table.*`, `json.*`, `pcall`, `type`, `pairs_sorted`, `ipairs`, `log`, `print`).

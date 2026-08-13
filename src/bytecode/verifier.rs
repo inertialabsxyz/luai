@@ -389,7 +389,7 @@ fn stack_analysis(proto_idx: u16, proto: &FunctionProto) -> Result<(), VerifyErr
                     }
                     // If pc+1 == code_len the instruction falls off the end; that's
                     // only valid if d_out == 0 (implicit Ret(0)), but we leave that
-                    // to the compiler to ensure — the spec only mandates Ret checks.
+                    // to the proveno-compiler to ensure — the spec only mandates Ret checks.
                 }
             }
         }

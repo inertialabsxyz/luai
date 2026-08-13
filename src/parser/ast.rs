@@ -17,7 +17,7 @@ pub struct Block {
 
 #[derive(Debug, Clone)]
 pub struct ReturnStmt {
-    /// At most one return value in v0.2 (multi-value exceptions handled by the compiler).
+    /// At most one return value in v0.2 (multi-value exceptions handled by the proveno-compiler).
     pub value: Option<Expr>,
     pub span: Span,
 }
